@@ -1,0 +1,14 @@
+[Unit]
+Description=jammon
+After=network.target
+
+[Service]
+Type=simple
+Restart=always
+RestartSec=5
+User=pi
+WorkingDirectory=/home/pi/jammon/
+ExecStart=/home/pi/jammon/run-jammon
+
+[Install]
+WantedBy=multi-user.target

@@ -1,0 +1,7 @@
+#!/usr/bin/env bash
+
+port_path="$(ls /dev/ttyACM*)"
+if [ $? -eq 0 ];
+then
+	/home/pi/jammon/jammon -d ${port_path};
+fi
