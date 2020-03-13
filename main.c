@@ -491,7 +491,8 @@ int main(int argc, char *argv[])
     uint32_t length;
     uint8_t buffer[1024];
 
-    FILE *csv_fptr; 
+    FILE *csv_fptr;
+    char csv_filename[32];
 
     while(!app_exit)
     {
@@ -618,7 +619,9 @@ int main(int argc, char *argv[])
 
                     jammon_datapoint.time_valid = 0;
 
-                    csv_fptr = fopen("log-jammon.csv", "a+"); 
+                    strftime(csv_filename, 31, "log-jammon-%Y-%m-%d.csv", localtime((time_t *)&(jammon_datapoint.gnss_timestamp)));
+
+                    csv_fptr = fopen(csv_filename, "a+"); 
                     if(csv_fptr != NULL)
                     {
                         fputs(csv_output_line, csv_fptr);

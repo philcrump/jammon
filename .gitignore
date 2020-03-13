@@ -1,4 +1,4 @@
 *~
 *.swp
 jammon
-log-jammon.csv
+log-jammon-*.csv
