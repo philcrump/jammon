@@ -113,6 +113,41 @@ const uint8_t ubx_enable_mon_hw[] = {
     0x23, 0x35 /* Checksum */
 };
 
+/* Crude Spectrum Analyzer */
+const uint8_t ubx_enable_mon_span[] = {
+    0xb5, 0x62,
+    0x06, 0x01, /* UBX-CFG-MSG */
+    0x08, 0x00,
+    0x0A, 0x31, /* Enable UBX-MON-SPAN */
+    0x00, /* Port 0 (I2C) */
+    0x00, /* Port 1 (UART/UART1) */
+    0x00, /* Port 2 (UART2) */
+    0x01, /* Port 3 (USB) at 1 second interval */
+    0x00, /* Port 4 */
+    0x00, /* Port 5 */
+    0x4b, 0x4d /* Checksum */
+};
+
+typedef struct
+{
+    uint8_t version;
+    uint8_t num_rfblocks;
+    uint8_t _reserved1;
+    uint8_t _reserved2;
+} __attribute__((packed)) mon_span_header_t;
+
+typedef struct
+{
+    uint8_t spectrum[256];
+    uint32_t span;
+    uint32_t res;
+    uint32_t center;
+    uint8_t pga;
+    uint8_t _reserved1;
+    uint8_t _reserved2;
+    uint8_t _reserved3;
+} __attribute__((packed)) mon_span_rfblock_t;
+
 /* Enable Interference Detection, BB threshold = 3dB, CW = 15dB, Active antenna */
 const uint8_t ubx_enable_itfm[] = {
     0xb5, 0x62,
@@ -440,18 +475,23 @@ int main(int argc, char *argv[])
         //return 1;
     }
 
-    #if 1
     if(0 != send_ubx_wait_ack(fd, ubx_enable_nav_sat, sizeof(ubx_enable_nav_sat)))
     {
         fprintf(stderr, "Failed to enable NAV SAT\n");
         //close(fd);
         //return 1;
     }
-    #endif
 
     if(0 != send_ubx_wait_ack(fd, ubx_enable_mon_hw, sizeof(ubx_enable_mon_hw)))
     {
         fprintf(stderr, "Failed to enable MON HW\n");
+        //close(fd);
+        //return 1;
+    }
+
+    if(0 != send_ubx_wait_ack(fd, ubx_enable_mon_span, sizeof(ubx_enable_mon_span)))
+    {
+        fprintf(stderr, "Failed to enable MON SPAN\n");
         //close(fd);
         //return 1;
     }
@@ -481,6 +521,14 @@ int main(int argc, char *argv[])
 
         uint64_t nav_sat_monotonic;
         uint8_t svs_acquired, svs_locked, svs_nav;
+
+        uint64_t mon_span_monotonic;
+        bool spectrum_valid;
+        uint8_t spectrum[256];
+        uint32_t span; // Hz
+        uint32_t res; // Hz
+        uint32_t center; // Hz
+        uint8_t pga; // dB
 
         uint16_t agc, noise;
         uint8_t jam_cw, jam_bb;
@@ -577,6 +625,40 @@ int main(int argc, char *argv[])
 
                 jammon_datapoint.nav_sat_monotonic = monotonic_ms();
             }
+            else if(buffer[2] == 0x0a && buffer[3] == 0x31)
+            {
+                if(verbose)
+                {
+                    printf("# Got MON-SPAN\n");
+                }
+
+                mon_span_header_t *span_header = (mon_span_header_t *)(&buffer[6]);
+
+                if(span_header->version != 0x00)
+                {
+                    fprintf(stderr, "Error: Version mismatch of MON-SPAN, expected 0x00, received: 0x%02x\n", span_header->version);
+                    continue;
+                }
+
+                if(span_header->num_rfblocks != 1)
+                {
+                    fprintf(stderr, "Error: Number of MON-SPAN RF Blocks, expected 1, received: %d\n", span_header->num_rfblocks);
+                    continue;
+                }
+
+                /* Assume we only want first rfblock */
+                mon_span_rfblock_t *span_rfblock = (mon_span_rfblock_t *)(&buffer[6+4+0]);
+
+                memcpy(jammon_datapoint.spectrum, span_rfblock->spectrum, 256);
+
+                jammon_datapoint.span = span_rfblock->span;
+                jammon_datapoint.res = span_rfblock->res;
+                jammon_datapoint.center = span_rfblock->center;
+                jammon_datapoint.pga = span_rfblock->pga;
+
+                jammon_datapoint.mon_span_monotonic = monotonic_ms();
+                jammon_datapoint.spectrum_valid = 1;
+            }
             else if(buffer[2] == 0x0a && buffer[3] == 0x09)
             {
                 if(verbose)
@@ -593,8 +675,8 @@ int main(int argc, char *argv[])
 
                 /* Only log if we've got a valid time, and all data is less than 1.5 seconds old */
                 if(jammon_datapoint.time_valid
-                    && (jammon_datapoint.nav_pvt_monotonic + 1500 > monotonic_ms())
-                    && (jammon_datapoint.nav_sat_monotonic + 1500 > monotonic_ms()))
+                    && (jammon_datapoint.nav_pvt_monotonic + 1200 > monotonic_ms())
+                    && (jammon_datapoint.nav_sat_monotonic + 1200 > monotonic_ms()))
                 {
                     if(verbose)
                     {
@@ -617,8 +699,6 @@ int main(int argc, char *argv[])
                         jammon_datapoint.jam_cw, jammon_datapoint.jam_bb
                     );
 
-                    jammon_datapoint.time_valid = 0;
-
                     strftime(csv_filename, 31, "log-jammon-%Y-%m-%d.csv", localtime((time_t *)&(jammon_datapoint.gnss_timestamp)));
 
                     csv_fptr = fopen(csv_filename, "a+"); 
@@ -628,6 +708,44 @@ int main(int argc, char *argv[])
                         fclose(csv_fptr);
                     }
                     free(csv_output_line);
+
+                    if(jammon_datapoint.spectrum_valid
+                        && jammon_datapoint.mon_span_monotonic + 1200 > monotonic_ms())
+                    {
+                        /* Allocate 2*256, + 1 for sprintf null termination */
+                        char *csv_output_spectrum = malloc((2*256)+1);
+
+                        if(csv_output_spectrum == NULL)
+                        {
+                            continue;
+                        }
+
+                        for(int i = 0; i < 255; i++)
+                        {
+                            sprintf(&csv_output_spectrum[i*2], "%02x", jammon_datapoint.spectrum[i]);
+                        }
+
+                        asprintf(&csv_output_line, "%lld,%d,%d,%d,%d,\"%s\"\n",
+                            jammon_datapoint.gnss_timestamp,
+                            jammon_datapoint.span, jammon_datapoint.res, jammon_datapoint.center, jammon_datapoint.pga,
+                            csv_output_spectrum
+                        );
+                        free(csv_output_spectrum);
+
+                        strftime(csv_filename, 31, "spectrum-jammon-%Y-%m-%d.csv", localtime((time_t *)&(jammon_datapoint.gnss_timestamp)));
+
+                        csv_fptr = fopen(csv_filename, "a+"); 
+                        if(csv_fptr != NULL)
+                        {
+                            fputs(csv_output_line, csv_fptr);
+                            fclose(csv_fptr);
+                        }
+                        free(csv_output_line);
+
+                        jammon_datapoint.spectrum_valid = false;
+                    }
+
+                    jammon_datapoint.time_valid = false;
                 }
             }
         }
