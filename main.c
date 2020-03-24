@@ -9,20 +9,14 @@
 #include <signal.h>
 #include <time.h>
 
+#include "main.h"
+#include "telemetry.h"
+
 static bool app_exit;
 static bool verbose = false;
 
-/*** Reset & Coldstart ***/
-const uint8_t ubx_reset_cold[] = {
-    0xb5, 0x62,
-    0x06, 0x04,
-    0x04, 0x00,
-    0xff, 0xb9, 0x01, 0x00,
-    0xc7, 0x8d /* Checksum */
-};
-
 /*** Disable NMEA ***/
-const uint8_t ubx_disable_nmea_usb[] = {
+static const uint8_t ubx_disable_nmea_usb[] = {
     0xb5, 0x62,
     0x06, 0x00,
     0x14, 0x00,
@@ -38,7 +32,7 @@ const uint8_t ubx_disable_nmea_usb[] = {
 
 /*** MODEL, 4 = automotive ***/
 /* UBX-CFG-NAV5 */
-const uint8_t ubx_set_nav_automotive[] = {
+static const uint8_t ubx_set_nav_automotive[] = {
     0xb5, 0x62,
     0x06, 0x24,
     0x24, 0x00,
@@ -65,7 +59,7 @@ const uint8_t ubx_set_nav_automotive[] = {
 };
 
 /* Time & Position */
-const uint8_t ubx_enable_nav_pvt[] = {
+static const uint8_t ubx_enable_nav_pvt[] = {
     0xb5, 0x62,
     0x06, 0x01, /* UBX-CFG-MSG */
     0x08, 0x00,
@@ -99,7 +93,7 @@ typedef struct {
 } __attribute__((packed)) mon_hw_t;
 
 /* Jamming indicators */
-const uint8_t ubx_enable_mon_hw[] = {
+static const uint8_t ubx_enable_mon_hw[] = {
     0xb5, 0x62,
     0x06, 0x01, /* UBX-CFG-MSG */
     0x08, 0x00,
@@ -114,7 +108,7 @@ const uint8_t ubx_enable_mon_hw[] = {
 };
 
 /* Crude Spectrum Analyzer */
-const uint8_t ubx_enable_mon_span[] = {
+static const uint8_t ubx_enable_mon_span[] = {
     0xb5, 0x62,
     0x06, 0x01, /* UBX-CFG-MSG */
     0x08, 0x00,
@@ -149,7 +143,7 @@ typedef struct
 } __attribute__((packed)) mon_span_rfblock_t;
 
 /* Enable Interference Detection, BB threshold = 3dB, CW = 15dB, Active antenna */
-const uint8_t ubx_enable_itfm[] = {
+static const uint8_t ubx_enable_itfm[] = {
     0xb5, 0x62,
     0x06, 0x39, /* UBX-CFG-ITFM */
     0x08, 0x00,
@@ -182,7 +176,7 @@ typedef struct
 } __attribute__((packed)) nav_pvt_t;
 
 /* SV Signals */
-const uint8_t ubx_enable_nav_sat[] = {
+static const uint8_t ubx_enable_nav_sat[] = {
     0xb5, 0x62,
     0x06, 0x01, /* UBX-CFG-MSG */
     0x08, 0x00,
@@ -216,7 +210,7 @@ typedef struct
     uint32_t flags;
 } __attribute__((packed)) nav_sat_sv_t;
 
-uint64_t monotonic_ms(void)
+static uint64_t monotonic_ms(void)
 {
     struct timespec tp;
 
@@ -228,7 +222,7 @@ uint64_t monotonic_ms(void)
     return (uint64_t) tp.tv_sec * 1000 + tp.tv_nsec / 1000000;
 }
 
-bool ubx_verify_checksum(const uint8_t *buffer, int32_t buffer_size)
+static bool ubx_verify_checksum(const uint8_t *buffer, int32_t buffer_size)
 {
     uint32_t ck_a = 0, ck_b = 0;
 
@@ -244,7 +238,7 @@ bool ubx_verify_checksum(const uint8_t *buffer, int32_t buffer_size)
 static const uint8_t msg_ack_header[4] = { 0xb5, 0x62, 0x05, 0x01 };
 static const uint8_t msg_nack_header[4] = { 0xb5, 0x62, 0x05, 0x00 };
 
-uint8_t send_ubx_wait_ack(int fd, const uint8_t *buffer, uint32_t buffer_size)
+static uint8_t send_ubx_wait_ack(int fd, const uint8_t *buffer, uint32_t buffer_size)
 {
     uint32_t k;
     uint8_t msg_class_id = buffer[2];
@@ -299,7 +293,7 @@ uint8_t send_ubx_wait_ack(int fd, const uint8_t *buffer, uint32_t buffer_size)
 }
 
 static const uint8_t msg_header[2] = { 0xb5, 0x62 };
-uint32_t wait_ubx(int fd, uint8_t *buffer)
+static uint32_t wait_ubx(int fd, uint8_t *buffer)
 {
     uint8_t response_byte;
     uint32_t response_index = 0;
@@ -383,7 +377,7 @@ void sigint_handler(int sig)
     app_exit = true;
 }
 
-void usage( void )
+static void usage( void )
 {
     printf("Usage: jammon [-v] -d <device>\n");  
 }
@@ -511,28 +505,6 @@ int main(int argc, char *argv[])
     }
 
     printf("Configuration Successful\n");
-
-    typedef struct {
-        uint64_t nav_pvt_monotonic;
-        bool time_valid;
-        uint64_t gnss_timestamp;
-        int32_t lat, lon, alt;
-        uint32_t h_acc, v_acc;
-
-        uint64_t nav_sat_monotonic;
-        uint8_t svs_acquired, svs_locked, svs_nav;
-
-        uint64_t mon_span_monotonic;
-        bool spectrum_valid;
-        uint8_t spectrum[256];
-        uint32_t span; // Hz
-        uint32_t res; // Hz
-        uint32_t center; // Hz
-        uint8_t pga; // dB
-
-        uint16_t agc, noise;
-        uint8_t jam_cw, jam_bb;
-    } jammon_datapoint_t;
 
     jammon_datapoint_t jammon_datapoint = { 0 };
 
@@ -673,10 +645,12 @@ int main(int argc, char *argv[])
                 jammon_datapoint.jam_cw = hw->jamInd;
                 jammon_datapoint.jam_bb = (hw->flags & 0x0c) >> 2; /* 0 - unknown, 1 - OK, 2 - Warning, 3 - Critical */
 
-                /* Only log if we've got a valid time, and all data is less than 1.5 seconds old */
+                /* Only log if we've got a valid time and spectrum, and all data is less than 1.5 seconds old */
                 if(jammon_datapoint.time_valid
                     && (jammon_datapoint.nav_pvt_monotonic + 1200 > monotonic_ms())
-                    && (jammon_datapoint.nav_sat_monotonic + 1200 > monotonic_ms()))
+                    && (jammon_datapoint.nav_sat_monotonic + 1200 > monotonic_ms())
+                    && jammon_datapoint.spectrum_valid
+                    && jammon_datapoint.mon_span_monotonic + 1200 > monotonic_ms())
                 {
                     if(verbose)
                     {
@@ -709,43 +683,41 @@ int main(int argc, char *argv[])
                     }
                     free(csv_output_line);
 
-                    if(jammon_datapoint.spectrum_valid
-                        && jammon_datapoint.mon_span_monotonic + 1200 > monotonic_ms())
+                    /* Allocate 2*256, + 1 for sprintf null termination */
+                    char *csv_output_spectrum = malloc((2*256)+1);
+
+                    if(csv_output_spectrum == NULL)
                     {
-                        /* Allocate 2*256, + 1 for sprintf null termination */
-                        char *csv_output_spectrum = malloc((2*256)+1);
-
-                        if(csv_output_spectrum == NULL)
-                        {
-                            continue;
-                        }
-
-                        for(int i = 0; i < 255; i++)
-                        {
-                            sprintf(&csv_output_spectrum[i*2], "%02x", jammon_datapoint.spectrum[i]);
-                        }
-
-                        asprintf(&csv_output_line, "%lld,%d,%d,%d,%d,\"%s\"\n",
-                            jammon_datapoint.gnss_timestamp,
-                            jammon_datapoint.span, jammon_datapoint.res, jammon_datapoint.center, jammon_datapoint.pga,
-                            csv_output_spectrum
-                        );
-                        free(csv_output_spectrum);
-
-                        strftime(csv_filename, 31, "spectrum-jammon-%Y-%m-%d.csv", localtime((time_t *)&(jammon_datapoint.gnss_timestamp)));
-
-                        csv_fptr = fopen(csv_filename, "a+"); 
-                        if(csv_fptr != NULL)
-                        {
-                            fputs(csv_output_line, csv_fptr);
-                            fclose(csv_fptr);
-                        }
-                        free(csv_output_line);
-
-                        jammon_datapoint.spectrum_valid = false;
+                        continue;
                     }
 
+                    for(int i = 0; i < 255; i++)
+                    {
+                        sprintf(&csv_output_spectrum[i*2], "%02x", jammon_datapoint.spectrum[i]);
+                    }
+
+                    asprintf(&csv_output_line, "%lld,%d,%d,%d,%d,\"%s\"\n",
+                        jammon_datapoint.gnss_timestamp,
+                        jammon_datapoint.span, jammon_datapoint.res, jammon_datapoint.center, jammon_datapoint.pga,
+                        csv_output_spectrum
+                    );
+                    free(csv_output_spectrum);
+
+                    strftime(csv_filename, 31, "spectrum-jammon-%Y-%m-%d.csv", localtime((time_t *)&(jammon_datapoint.gnss_timestamp)));
+
+                    csv_fptr = fopen(csv_filename, "a+"); 
+                    if(csv_fptr != NULL)
+                    {
+                        fputs(csv_output_line, csv_fptr);
+                        fclose(csv_fptr);
+                    }
+                    free(csv_output_line);
+
+                    /* Lastly, send UDP Telemetry */
+                    udp_send_msgpack(&jammon_datapoint);
+
                     jammon_datapoint.time_valid = false;
+                    jammon_datapoint.spectrum_valid = false;
                 }
             }
         }

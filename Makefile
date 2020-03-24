@@ -18,7 +18,9 @@ BIN = jammon
 
 SRCDIR = .
 
-SRC = $(SRCDIR)/main.c
+SRC = $(SRCDIR)/main.c \
+		$(SRCDIR)/telemetry.c \
+		$(SRCDIR)/cmp.c
 
 # ========================================================================================
 # External Libraries
