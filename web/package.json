@@ -1,0 +1,24 @@
+{
+  "name": "jammon-web",
+  "version": "1.0.0",
+  "description": "Web dashboard for jammon",
+  "main": "main.js",
+  "dependencies": {
+    "@msgpack/msgpack": "^1.12.1",
+    "socket.io": "^2.3.0"
+  },
+  "devDependencies": {},
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/philcrump/jammon.git"
+  },
+  "author": "Phil Crump",
+  "license": "MIT",
+  "bugs": {
+    "url": "https://github.com/philcrump/jammon/issues"
+  },
+  "homepage": "https://github.com/philcrump/jammon#readme"
+}

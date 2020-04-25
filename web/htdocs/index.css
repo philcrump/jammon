@@ -1,0 +1,16 @@
+body {
+	font-family: "Open Sans", Arial, sans-serif;
+}
+#mobile-view {
+	width: 100%;
+	max-width: 500px;
+	padding: 15px;
+	padding-top: 5px;
+	/*margin: 0 auto;*/
+}
+#gnss-location-map {
+	height: 250px;
+}
+#gnss-spectrum-graph {
+	height: 250px;
+}

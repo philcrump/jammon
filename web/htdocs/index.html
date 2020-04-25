@@ -1,0 +1,43 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta http-equiv="X-UA-Compatible" content="IE=edge">
+    <title>Jammon Telemetry</title>
+    <meta name="author" content="Phil Crump">
+    <script src="/lib/jquery-3.4.1.min.js"></script>
+    <script src="/lib/socket.io-2.3.0.min.js"></script>
+    <script src="/lib/dygraph-2.1.0.min.js"></script>
+    <script src="/lib/leaflet-1.6.0/leaflet.js"></script>
+    <script src="index.js?v=0"></script>
+    <link rel="stylesheet" href="/lib/leaflet-1.6.0/leaflet.css">
+    <link rel="stylesheet" href="index.css">
+  </head>
+  <body>
+    <div id="mobile-view">
+        <p>
+            <b>Timestamp</b>: <span id="gnss-timestamp"></span>
+        </p>
+        <p>
+            <div id="gnss-location-map"></div>
+            <ul>
+                <li>Horizontal: <span id="gnss-latitude"></span>°, <span id="gnss-longitude"></span>°, +- <span id="gnss-hacc"></span>m</li>
+                <li>Vertical: <span id="gnss-altitude"></span>m, +- <span id="gnss-vacc"></span>m</li>
+            </ul>
+        </p>
+        <p>
+            <b>SVs</b>: <span id="svs-acquired"></span> acquired, <span id="svs-locked"></span> locked, <span id="svs-nav"></span> in nav soln.
+        </p>
+        <p>
+            <b>RF</b>: AGC: <span id="gnss-rf-agc"></span>, Noise: <span id="gnss-rf-noise"></span>
+        </p>
+        <p>
+            <b>Jamming</b>: CW: <span id="gnss-jamming-cw"></span> / 255, BB: <span id="gnss-jamming-broadband"></span> / 3 (<span id="gnss-jamming-broadband-description"></span>)
+        </p>
+        <p>
+            <div id="gnss-spectrum-graph"></div>
+        </p>
+    </div>
+
+  </body>
+</html>
