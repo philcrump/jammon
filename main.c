@@ -527,11 +527,67 @@ int main(int argc, char *argv[])
             printf("\n");
             #endif
 
-            if(buffer[2] == 0x01 && buffer[3] == 0x07)
+            /* Order that we're expecting is, within ~100ms of each other:
+                1. MON-HW
+                2. MON-SPAN
+                3. NAV-PVT
+                4. NAV-SAT
+            */
+
+            if(buffer[2] == 0x0a && buffer[3] == 0x09) /* MON-HW */
             {
                 if(verbose)
                 {
-                    printf("# Got NAV-PVT\n");
+                    printf("# Got MON-HW at %.3f (monotonic)\n", (double)monotonic_ms() / 1000);
+                }
+
+                mon_hw_t *hw = (mon_hw_t *)(&buffer[6]);
+
+                jammon_datapoint.agc = hw->agcCnt;
+                jammon_datapoint.noise = hw->noisePerMS;
+                jammon_datapoint.jam_cw = hw->jamInd;
+                jammon_datapoint.jam_bb = (hw->flags & 0x0c) >> 2; /* 0 - unknown, 1 - OK, 2 - Warning, 3 - Critical */
+
+                jammon_datapoint.mon_hw_monotonic = monotonic_ms();
+            }
+            else if(buffer[2] == 0x0a && buffer[3] == 0x31) /* MON-SPAN */
+            {
+                if(verbose)
+                {
+                    printf("# Got MON-SPAN at %.3f (monotonic)\n", (double)monotonic_ms() / 1000);
+                }
+
+                mon_span_header_t *span_header = (mon_span_header_t *)(&buffer[6]);
+
+                if(span_header->version != 0x00)
+                {
+                    fprintf(stderr, "Error: Version mismatch of MON-SPAN, expected 0x00, received: 0x%02x\n", span_header->version);
+                    continue;
+                }
+
+                if(span_header->num_rfblocks != 1)
+                {
+                    fprintf(stderr, "Error: Number of MON-SPAN RF Blocks, expected 1, received: %d\n", span_header->num_rfblocks);
+                    continue;
+                }
+
+                /* Assume we only want first rfblock */
+                mon_span_rfblock_t *span_rfblock = (mon_span_rfblock_t *)(&buffer[6+4+0]);
+
+                memcpy(jammon_datapoint.spectrum, span_rfblock->spectrum, 256);
+
+                jammon_datapoint.span = span_rfblock->span;
+                jammon_datapoint.res = span_rfblock->res;
+                jammon_datapoint.center = span_rfblock->center;
+                jammon_datapoint.pga = span_rfblock->pga;
+
+                jammon_datapoint.mon_span_monotonic = monotonic_ms();
+            }
+            else if(buffer[2] == 0x01 && buffer[3] == 0x07) /* NAV-PVT */
+            {
+                if(verbose)
+                {
+                    printf("# Got NAV-PVT at %.3f (monotonic)\n", (double)monotonic_ms() / 1000);
                 }
 
                 nav_pvt_t *pvt = (nav_pvt_t *)(&buffer[6]);
@@ -553,16 +609,13 @@ int main(int argc, char *argv[])
                 jammon_datapoint.h_acc = pvt->hAcc;
                 jammon_datapoint.v_acc = pvt->vAcc;
 
-                if(jammon_datapoint.time_valid)
-                {
-                    jammon_datapoint.nav_pvt_monotonic = monotonic_ms();
-                }
+                jammon_datapoint.nav_pvt_monotonic = monotonic_ms();
             }
-            else if(buffer[2] == 0x01 && buffer[3] == 0x35)
+            else if(buffer[2] == 0x01 && buffer[3] == 0x35) /* NAV-SAT */
             {
                 if(verbose)
                 {
-                    printf("# Got NAV-SAT\n");
+                    printf("# Got NAV-SAT at %.3f (monotonic)\n", (double)monotonic_ms() / 1000);
                 }
 
                 nav_sat_header_t *sat_header = (nav_sat_header_t *)(&buffer[6]);
@@ -595,62 +648,13 @@ int main(int argc, char *argv[])
                     }
                 }
 
-                jammon_datapoint.nav_sat_monotonic = monotonic_ms();
-            }
-            else if(buffer[2] == 0x0a && buffer[3] == 0x31)
-            {
-                if(verbose)
-                {
-                    printf("# Got MON-SPAN\n");
-                }
-
-                mon_span_header_t *span_header = (mon_span_header_t *)(&buffer[6]);
-
-                if(span_header->version != 0x00)
-                {
-                    fprintf(stderr, "Error: Version mismatch of MON-SPAN, expected 0x00, received: 0x%02x\n", span_header->version);
-                    continue;
-                }
-
-                if(span_header->num_rfblocks != 1)
-                {
-                    fprintf(stderr, "Error: Number of MON-SPAN RF Blocks, expected 1, received: %d\n", span_header->num_rfblocks);
-                    continue;
-                }
-
-                /* Assume we only want first rfblock */
-                mon_span_rfblock_t *span_rfblock = (mon_span_rfblock_t *)(&buffer[6+4+0]);
-
-                memcpy(jammon_datapoint.spectrum, span_rfblock->spectrum, 256);
-
-                jammon_datapoint.span = span_rfblock->span;
-                jammon_datapoint.res = span_rfblock->res;
-                jammon_datapoint.center = span_rfblock->center;
-                jammon_datapoint.pga = span_rfblock->pga;
-
-                jammon_datapoint.mon_span_monotonic = monotonic_ms();
-                jammon_datapoint.spectrum_valid = 1;
-            }
-            else if(buffer[2] == 0x0a && buffer[3] == 0x09)
-            {
-                if(verbose)
-                {
-                    printf("# Got MON-HW\n");
-                }
-
-                mon_hw_t *hw = (mon_hw_t *)(&buffer[6]);
-
-                jammon_datapoint.agc = hw->agcCnt;
-                jammon_datapoint.noise = hw->noisePerMS;
-                jammon_datapoint.jam_cw = hw->jamInd;
-                jammon_datapoint.jam_bb = (hw->flags & 0x0c) >> 2; /* 0 - unknown, 1 - OK, 2 - Warning, 3 - Critical */
-
-                /* Only log if we've got a valid time and spectrum, and all data is less than 1.5 seconds old */
+                /* Only log if we've got a valid time, all data is populated, and less than 700 milliseconds old */
+                uint64_t now_monotonic = monotonic_ms();
                 if(jammon_datapoint.time_valid
-                    && (jammon_datapoint.nav_pvt_monotonic + 1200 > monotonic_ms())
-                    && (jammon_datapoint.nav_sat_monotonic + 1200 > monotonic_ms())
-                    && jammon_datapoint.spectrum_valid
-                    && jammon_datapoint.mon_span_monotonic + 1200 > monotonic_ms())
+                    && (jammon_datapoint.mon_hw_monotonic > 0) && (jammon_datapoint.mon_hw_monotonic + 700 > now_monotonic)
+                    && (jammon_datapoint.mon_span_monotonic > 0) && (jammon_datapoint.mon_span_monotonic + 700 > now_monotonic)
+                    && (jammon_datapoint.nav_pvt_monotonic > 0) && (jammon_datapoint.nav_pvt_monotonic + 700 > now_monotonic)
+                )
                 {
                     if(verbose)
                     {
@@ -681,6 +685,10 @@ int main(int argc, char *argv[])
                         fputs(csv_output_line, csv_fptr);
                         fclose(csv_fptr);
                     }
+                    else
+                    {
+                        fprintf(stderr, "Error: Unable to open log CSV file\n");
+                    }
                     free(csv_output_line);
 
                     /* Allocate 2*256, + 1 for sprintf null termination */
@@ -688,6 +696,7 @@ int main(int argc, char *argv[])
 
                     if(csv_output_spectrum == NULL)
                     {
+                        fprintf(stderr, "Error: Unable to allocate memory for spectrum CSV line\n");
                         continue;
                     }
 
@@ -711,13 +720,14 @@ int main(int argc, char *argv[])
                         fputs(csv_output_line, csv_fptr);
                         fclose(csv_fptr);
                     }
+                    else
+                    {
+                        fprintf(stderr, "Error: Unable to open spectrum CSV file\n");
+                    }
                     free(csv_output_line);
 
                     /* Lastly, send UDP Telemetry */
                     udp_send_msgpack(&jammon_datapoint);
-
-                    jammon_datapoint.time_valid = false;
-                    jammon_datapoint.spectrum_valid = false;
                 }
             }
         }
