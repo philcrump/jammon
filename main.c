@@ -647,13 +647,12 @@ int main(int argc, char *argv[])
                         jammon_datapoint.svs_nav++;
                     }
                 }
-
-                /* Only log if we've got a valid time, all data is populated, and less than 700 milliseconds old */
+	    }
+                /* Only log if we've got a valid time, all data is populated, and less than 500 milliseconds old */
                 uint64_t now_monotonic = monotonic_ms();
-                if(jammon_datapoint.time_valid
-                    && (jammon_datapoint.mon_hw_monotonic > 0) && (jammon_datapoint.mon_hw_monotonic + 700 > now_monotonic)
-                    && (jammon_datapoint.mon_span_monotonic > 0) && (jammon_datapoint.mon_span_monotonic + 700 > now_monotonic)
-                    && (jammon_datapoint.nav_pvt_monotonic > 0) && (jammon_datapoint.nav_pvt_monotonic + 700 > now_monotonic)
+                if(    (jammon_datapoint.mon_hw_monotonic > 0) && (jammon_datapoint.mon_hw_monotonic + 500 > now_monotonic)
+                    && (jammon_datapoint.mon_span_monotonic > 0) && (jammon_datapoint.mon_span_monotonic + 500 > now_monotonic)
+                    && (jammon_datapoint.nav_pvt_monotonic > 0) && (jammon_datapoint.nav_pvt_monotonic + 500 > now_monotonic)
                 )
                 {
                     if(verbose)
@@ -666,6 +665,10 @@ int main(int argc, char *argv[])
                         printf(" - AGC: %d, Noise: %d\n", jammon_datapoint.agc, jammon_datapoint.noise);
                         printf(" - Jamming: CW: %d / 255, Broadband: %d / 3 (0 = invalid)\n", jammon_datapoint.jam_cw, jammon_datapoint.jam_bb);
                     }
+
+		    if(jammon_datapoint.time_valid)
+		    {
+
 
                     char *csv_output_line;
                     asprintf(&csv_output_line, "%lld,%.24s,%.5f,%.5f,%.1f,%.1f,%.1f,%d,%d,%d,%d,%d,%d,%d\n",
@@ -726,9 +729,10 @@ int main(int argc, char *argv[])
                     }
                     free(csv_output_line);
 
+		}
+
                     /* Lastly, send UDP Telemetry */
                     udp_send_msgpack(&jammon_datapoint);
-                }
             }
         }
 
