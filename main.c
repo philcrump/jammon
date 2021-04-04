@@ -15,6 +15,7 @@
 
 static bool app_exit;
 static bool verbose = false;
+static bool multiband = false;
 
 /*** Disable NMEA ***/
 static const uint8_t ubx_disable_nmea_usb[] = {
@@ -394,7 +395,7 @@ int main(int argc, char *argv[])
     signal(SIGTERM, sigint_handler);
    
     memset(devName, 0, sizeof(devName));
-    while((option = getopt( argc, argv, "vd:")) != -1)
+    while((option = getopt( argc, argv, "vd:M")) != -1)
     {
         switch(option)
         {
@@ -405,6 +406,10 @@ int main(int argc, char *argv[])
             case 'v':
                 printf(" * Verbose Mode Enabled\n");
                 verbose = true;
+                break;
+            case 'M':
+                printf(" * Multiband (F9) Enabled\n");
+                multiband = true;
                 break;
             default:
                 usage();
@@ -508,6 +513,7 @@ int main(int argc, char *argv[])
     printf("Configuration Successful\n");
 
     jammon_datapoint_t jammon_datapoint = { 0 };
+    jammon_datapoint.multiband = multiband;
 
     uint32_t length;
     uint8_t buffer[1024];
@@ -566,23 +572,59 @@ int main(int argc, char *argv[])
                     continue;
                 }
 
-                if(span_header->num_rfblocks != 1)
+                if(multiband == false)
                 {
-                    fprintf(stderr, "Error: Number of MON-SPAN RF Blocks, expected 1, received: %d\n", span_header->num_rfblocks);
-                    continue;
+                    /* Single-band, (probably L1) - eg. M8 */
+
+                    if(span_header->num_rfblocks != 1)
+                    {
+                        fprintf(stderr, "Error: Number of MON-SPAN RF Blocks, expected 1 (single-band), received: %d\n", span_header->num_rfblocks);
+                        continue;
+                    }
+
+                    mon_span_rfblock_t *span_rfblock = (mon_span_rfblock_t *)(&buffer[6+4+0]);
+
+                    memcpy(jammon_datapoint.spectrum, span_rfblock->spectrum, 256);
+
+                    jammon_datapoint.span = span_rfblock->span;
+                    jammon_datapoint.res = span_rfblock->res;
+                    jammon_datapoint.center = span_rfblock->center;
+                    jammon_datapoint.pga = span_rfblock->pga;
+
+                    jammon_datapoint.mon_span_monotonic = monotonic_ms();
                 }
+                else
+                {
+                    /* Dual-band (probably L1 + L2) - eg. F9 */
 
-                /* Assume we only want first rfblock */
-                mon_span_rfblock_t *span_rfblock = (mon_span_rfblock_t *)(&buffer[6+4+0]);
+                    if(span_header->num_rfblocks != 2)
+                    {
+                        fprintf(stderr, "Error: Number of MON-SPAN RF Blocks, expected 2 (multi-band), received: %d\n", span_header->num_rfblocks);
+                        continue;
+                    }
 
-                memcpy(jammon_datapoint.spectrum, span_rfblock->spectrum, 256);
+                    mon_span_rfblock_t *span_rfblock = (mon_span_rfblock_t *)(&buffer[6+4+0]);
 
-                jammon_datapoint.span = span_rfblock->span;
-                jammon_datapoint.res = span_rfblock->res;
-                jammon_datapoint.center = span_rfblock->center;
-                jammon_datapoint.pga = span_rfblock->pga;
+                    memcpy(jammon_datapoint.spectrum, span_rfblock->spectrum, 256);
 
-                jammon_datapoint.mon_span_monotonic = monotonic_ms();
+                    jammon_datapoint.span = span_rfblock->span;
+                    jammon_datapoint.res = span_rfblock->res;
+                    jammon_datapoint.center = span_rfblock->center;
+                    jammon_datapoint.pga = span_rfblock->pga;
+
+                    /* Re-use pointer for second block */
+                    span_rfblock = (mon_span_rfblock_t *)(&buffer[6+4+0+272]);
+
+                    memcpy(jammon_datapoint.spectrum2, span_rfblock->spectrum, 256);
+
+                    jammon_datapoint.span2 = span_rfblock->span;
+                    jammon_datapoint.res2 = span_rfblock->res;
+                    jammon_datapoint.center2 = span_rfblock->center;
+                    jammon_datapoint.pga2 = span_rfblock->pga;
+
+                    jammon_datapoint.mon_span_monotonic = monotonic_ms();
+                }
+                
             }
             else if(buffer[2] == 0x01 && buffer[3] == 0x07) /* NAV-PVT */
             {
@@ -720,7 +762,7 @@ int main(int argc, char *argv[])
                         sprintf(&csv_output_spectrum[i*2], "%02x", jammon_datapoint.spectrum[i]);
                     }
 
-                    r = asprintf(&csv_output_line, "%"PRIu64",%d,%d,%d,%d,\"%s\"\n",
+                    r = asprintf(&csv_output_line, "%"PRIu64",%d,%d,%d,%d,\"%s\"",
                         jammon_datapoint.gnss_timestamp,
                         jammon_datapoint.span, jammon_datapoint.res, jammon_datapoint.center, jammon_datapoint.pga,
                         csv_output_spectrum
@@ -730,15 +772,52 @@ int main(int argc, char *argv[])
                     if(r < 0)
                     {
                         fprintf(stderr, "Error: asprintf of Spectrum CSV line failed.\n");
+                        free(csv_output_line);
                     }
                     else
                     {
+                        if(multiband)
+                        {
+                            /* Append second spectrum to CSV line */
+                            csv_output_spectrum = malloc((2*256)+1);
+
+                            if(csv_output_spectrum == NULL)
+                            {
+                                fprintf(stderr, "Error: Unable to allocate memory for spectrum2 CSV line\n");
+                                continue;
+                            }
+
+                            for(int i = 0; i < 255; i++)
+                            {
+                                sprintf(&csv_output_spectrum[i*2], "%02x", jammon_datapoint.spectrum2[i]);
+                            }
+
+                            char *new_csv_output_line;
+                            r = asprintf(&new_csv_output_line, "%s,%d,%d,%d,%d,\"%s\"",
+                                csv_output_line,
+                                jammon_datapoint.span2, jammon_datapoint.res2, jammon_datapoint.center2, jammon_datapoint.pga2,
+                                csv_output_spectrum
+                            );
+                            free(csv_output_spectrum);
+
+                            if(r < 0)
+                            {
+                                fprintf(stderr, "Error: asprintf of Spectrum2 CSV line failed.\n");
+                                free(csv_output_line);
+                            }
+                            else
+                            {
+                                csv_output_line = new_csv_output_line;
+                            }
+                        }
+
                         strftime(csv_filename, 31, "spectrum-jammon-%Y-%m-%d.csv", localtime((time_t *)&(jammon_datapoint.gnss_timestamp)));
 
                         csv_fptr = fopen(csv_filename, "a+"); 
                         if(csv_fptr != NULL)
                         {
                             fputs(csv_output_line, csv_fptr);
+                            fputc('\n', csv_fptr);
                             fclose(csv_fptr);
                         }
                         else

@@ -13,6 +13,13 @@ typedef struct {
     uint32_t center; // Hz
     uint8_t pga; // dB
 
+    bool multiband;
+    uint8_t spectrum2[256]; // Only used in multi-band (eg. F9)
+    uint32_t span2; // Hz
+    uint32_t res2; // Hz
+    uint32_t center2; // Hz
+    uint8_t pga2; // dB
+
     uint64_t nav_pvt_monotonic;
     bool time_valid;
     uint64_t gnss_timestamp;

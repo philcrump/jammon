@@ -12,7 +12,8 @@
 #include "main.h"
 #include "cmp.h"
 
-#define UDP_DESTINATION_HOST    "jammon.philcrump.co.uk"
+//#define UDP_DESTINATION_HOST    "jammon.philcrump.co.uk"
+#define UDP_DESTINATION_HOST    "127.0.0.1"
 #define UDP_DESTINATION_PORT    44333
 
 #define CMP_BUFFER_SIZE     4096
@@ -102,8 +103,8 @@ void udp_send_msgpack(jammon_datapoint_t *jammon_datapoint_ptr)
     cmp_buf_ptr = 0;
     cmp_init(&cmp, (void*)buffer, 0, file_skipper, file_writer);
 
-    /* Start map, 7 items */
-    cmp_write_map(&cmp, 7);
+    /* Start map, 7 items, 8 items if multiband (spectrum2) */
+    cmp_write_map(&cmp, (jammon_datapoint_ptr->multiband ? 8 : 7));
 
     /* GNSS timestamp */
     cmp_write_uint(&cmp, 0);
@@ -148,6 +149,17 @@ void udp_send_msgpack(jammon_datapoint_t *jammon_datapoint_ptr)
     cmp_write_uint(&cmp, jammon_datapoint_ptr->res);
     cmp_write_bin(&cmp, jammon_datapoint_ptr->spectrum, 256);
     cmp_write_uint(&cmp, jammon_datapoint_ptr->pga);
+
+    if(jammon_datapoint_ptr->multiband)
+    {
+        /* Array of [center, res, spectrum[256], pga] */
+        cmp_write_uint(&cmp, 11);
+        cmp_write_array(&cmp, 4);
+        cmp_write_uint(&cmp, jammon_datapoint_ptr->center2);
+        cmp_write_uint(&cmp, jammon_datapoint_ptr->res2);
+        cmp_write_bin(&cmp, jammon_datapoint_ptr->spectrum2, 256);
+        cmp_write_uint(&cmp, jammon_datapoint_ptr->pga2);
+    }
 
     udp_send(buffer, cmp_buf_ptr);
 }
