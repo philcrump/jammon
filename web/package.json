@@ -4,8 +4,8 @@
   "description": "Web dashboard for jammon",
   "main": "main.js",
   "dependencies": {
-    "@msgpack/msgpack": "^1.12.1",
-    "socket.io": "^2.3.0"
+    "@msgpack/msgpack": "^2.5.1",
+    "socket.io": "^4.0.1"
   },
   "devDependencies": {},
   "scripts": {
