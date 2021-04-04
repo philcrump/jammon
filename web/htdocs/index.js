@@ -1,4 +1,4 @@
-var socket = io('http://jammon.philcrump.co.uk/');
+var socket = io();
 
 var location_map = null;
 var location_map_marker = null;

@@ -1,14 +1,18 @@
 #!/usr/bin/env node
 
 const port_input_udp_msgpack = 44333;
-const port_output_socketio = 8005;
+const port_output_http = 8005;
 
 const dgram = require('dgram');
 const server = dgram.createSocket('udp4');
-
 const msgpack = require("@msgpack/msgpack");
 
-var io = require('socket.io')(port_output_socketio);
+const express = require('express');
+const app = express();
+const http = require('http').Server(app);
+const io = require('socket.io')(http);
+
+/*** UDP ***/
 
 server.on('error', (err) => {
   console.log(`server error:\n${err.stack}`);
@@ -29,7 +33,15 @@ server.on('message', (msg, rinfo) => {
 
 server.on('listening', () => {
   const address = server.address();
-  console.log(`server listening ${address.address}:${address.port}`);
+  console.log(`UDP server listening ${address.address}:${address.port}`);
 });
 
 server.bind(port_input_udp_msgpack);
+
+/*** HTTP ***/
+
+app.use(express.static('htdocs'));
+
+http.listen(port_output_http, () => {
+  console.log(`HTTP listening on *:${port_output_http} dev link: http://127.0.0.1:${port_output_http}`);
+});
