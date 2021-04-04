@@ -3,6 +3,7 @@
 #include <termios.h>
 #include <unistd.h>
 #include <stdint.h>
+#include <inttypes.h>
 #include <stdbool.h>
 #include <stdlib.h>
 #include <fcntl.h>
@@ -658,7 +659,7 @@ int main(int argc, char *argv[])
                     if(verbose)
                     {
                         printf("Datapoint:\n");
-                        printf(" - Timestamp: %lld - %.24s\n", jammon_datapoint.gnss_timestamp, ctime((time_t *)&jammon_datapoint.gnss_timestamp));
+                        printf(" - Timestamp: %"PRIu64" - %.24s\n", jammon_datapoint.gnss_timestamp, ctime((time_t *)&jammon_datapoint.gnss_timestamp));
                         printf(" - Position: %d, %d, %d\n", jammon_datapoint.lat, jammon_datapoint.lon, jammon_datapoint.alt);
                         printf(" - Accuracy: H: %.1fm, V: %.1fm\n", jammon_datapoint.h_acc / 1.0e3, jammon_datapoint.v_acc / 1.0e3);
                         printf(" - SVs: Acquired: %d, Locked: %d, Used in Nav: %d\n", jammon_datapoint.svs_acquired, jammon_datapoint.svs_locked, jammon_datapoint.svs_nav);
@@ -668,10 +669,10 @@ int main(int argc, char *argv[])
 
 		    if(jammon_datapoint.time_valid)
 		    {
-
-
+                    int r;
                     char *csv_output_line;
-                    asprintf(&csv_output_line, "%lld,%.24s,%.5f,%.5f,%.1f,%.1f,%.1f,%d,%d,%d,%d,%d,%d,%d\n",
+
+                    r = asprintf(&csv_output_line, "%"PRIu64",%.24s,%.5f,%.5f,%.1f,%.1f,%.1f,%d,%d,%d,%d,%d,%d,%d\n",
                         jammon_datapoint.gnss_timestamp, ctime((time_t *)&jammon_datapoint.gnss_timestamp),
                         (jammon_datapoint.lat / 1.0e7), (jammon_datapoint.lon / 1.0e7), (jammon_datapoint.alt / 1.0e3),
                         jammon_datapoint.h_acc / 1.0e3, jammon_datapoint.v_acc / 1.0e3,
@@ -680,19 +681,29 @@ int main(int argc, char *argv[])
                         jammon_datapoint.jam_cw, jammon_datapoint.jam_bb
                     );
 
-                    strftime(csv_filename, 31, "log-jammon-%Y-%m-%d.csv", localtime((time_t *)&(jammon_datapoint.gnss_timestamp)));
-
-                    csv_fptr = fopen(csv_filename, "a+"); 
-                    if(csv_fptr != NULL)
+                    if(r < 0)
                     {
-                        fputs(csv_output_line, csv_fptr);
-                        fclose(csv_fptr);
+                        fprintf(stderr, "Error: asprintf of Log CSV line failed.\n");
                     }
                     else
                     {
-                        fprintf(stderr, "Error: Unable to open log CSV file\n");
+                        strftime(csv_filename, 31, "log-jammon-%Y-%m-%d.csv", localtime((time_t *)&(jammon_datapoint.gnss_timestamp)));
+
+                        csv_fptr = fopen(csv_filename, "a+"); 
+                        if(csv_fptr != NULL)
+                        {
+                            fputs(csv_output_line, csv_fptr);
+                            fclose(csv_fptr);
+                        }
+                        else
+                        {
+                            fprintf(stderr, "Error: Unable to open log CSV file\n");
+                        }
+
+                        free(csv_output_line);
                     }
-                    free(csv_output_line);
+
+                    
 
                     /* Allocate 2*256, + 1 for sprintf null termination */
                     char *csv_output_spectrum = malloc((2*256)+1);
@@ -708,31 +719,37 @@ int main(int argc, char *argv[])
                         sprintf(&csv_output_spectrum[i*2], "%02x", jammon_datapoint.spectrum[i]);
                     }
 
-                    asprintf(&csv_output_line, "%lld,%d,%d,%d,%d,\"%s\"\n",
+                    r = asprintf(&csv_output_line, "%"PRIu64",%d,%d,%d,%d,\"%s\"\n",
                         jammon_datapoint.gnss_timestamp,
                         jammon_datapoint.span, jammon_datapoint.res, jammon_datapoint.center, jammon_datapoint.pga,
                         csv_output_spectrum
                     );
                     free(csv_output_spectrum);
 
-                    strftime(csv_filename, 31, "spectrum-jammon-%Y-%m-%d.csv", localtime((time_t *)&(jammon_datapoint.gnss_timestamp)));
-
-                    csv_fptr = fopen(csv_filename, "a+"); 
-                    if(csv_fptr != NULL)
+                    if(r < 0)
                     {
-                        fputs(csv_output_line, csv_fptr);
-                        fclose(csv_fptr);
+                        fprintf(stderr, "Error: asprintf of Spectrum CSV line failed.\n");
                     }
                     else
                     {
-                        fprintf(stderr, "Error: Unable to open spectrum CSV file\n");
+                        strftime(csv_filename, 31, "spectrum-jammon-%Y-%m-%d.csv", localtime((time_t *)&(jammon_datapoint.gnss_timestamp)));
+
+                        csv_fptr = fopen(csv_filename, "a+"); 
+                        if(csv_fptr != NULL)
+                        {
+                            fputs(csv_output_line, csv_fptr);
+                            fclose(csv_fptr);
+                        }
+                        else
+                        {
+                            fprintf(stderr, "Error: Unable to open spectrum CSV file\n");
+                        }
+                        free(csv_output_line);
                     }
-                    free(csv_output_line);
+                }
 
-		}
-
-                    /* Lastly, send UDP Telemetry */
-                    udp_send_msgpack(&jammon_datapoint);
+                /* Lastly, send UDP Telemetry */
+                udp_send_msgpack(&jammon_datapoint);
             }
         }
 
