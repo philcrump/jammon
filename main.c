@@ -648,27 +648,28 @@ int main(int argc, char *argv[])
                         jammon_datapoint.svs_nav++;
                     }
                 }
-	    }
-                /* Only log if we've got a valid time, all data is populated, and less than 500 milliseconds old */
-                uint64_t now_monotonic = monotonic_ms();
-                if(    (jammon_datapoint.mon_hw_monotonic > 0) && (jammon_datapoint.mon_hw_monotonic + 500 > now_monotonic)
-                    && (jammon_datapoint.mon_span_monotonic > 0) && (jammon_datapoint.mon_span_monotonic + 500 > now_monotonic)
-                    && (jammon_datapoint.nav_pvt_monotonic > 0) && (jammon_datapoint.nav_pvt_monotonic + 500 > now_monotonic)
-                )
-                {
-                    if(verbose)
-                    {
-                        printf("Datapoint:\n");
-                        printf(" - Timestamp: %"PRIu64" - %.24s\n", jammon_datapoint.gnss_timestamp, ctime((time_t *)&jammon_datapoint.gnss_timestamp));
-                        printf(" - Position: %d, %d, %d\n", jammon_datapoint.lat, jammon_datapoint.lon, jammon_datapoint.alt);
-                        printf(" - Accuracy: H: %.1fm, V: %.1fm\n", jammon_datapoint.h_acc / 1.0e3, jammon_datapoint.v_acc / 1.0e3);
-                        printf(" - SVs: Acquired: %d, Locked: %d, Used in Nav: %d\n", jammon_datapoint.svs_acquired, jammon_datapoint.svs_locked, jammon_datapoint.svs_nav);
-                        printf(" - AGC: %d, Noise: %d\n", jammon_datapoint.agc, jammon_datapoint.noise);
-                        printf(" - Jamming: CW: %d / 255, Broadband: %d / 3 (0 = invalid)\n", jammon_datapoint.jam_cw, jammon_datapoint.jam_bb);
-                    }
+            }
 
-		    if(jammon_datapoint.time_valid)
-		    {
+            /* Only log if we've got a valid time, all data is populated, and less than 500 milliseconds old */
+            uint64_t now_monotonic = monotonic_ms();
+            if(    (jammon_datapoint.mon_hw_monotonic > 0) && (jammon_datapoint.mon_hw_monotonic + 500 > now_monotonic)
+                && (jammon_datapoint.mon_span_monotonic > 0) && (jammon_datapoint.mon_span_monotonic + 500 > now_monotonic)
+                && (jammon_datapoint.nav_pvt_monotonic > 0) && (jammon_datapoint.nav_pvt_monotonic + 500 > now_monotonic)
+            )
+            {
+                if(verbose)
+                {
+                    printf("Datapoint:\n");
+                    printf(" - Timestamp: %"PRIu64" - %.24s\n", jammon_datapoint.gnss_timestamp, ctime((time_t *)&jammon_datapoint.gnss_timestamp));
+                    printf(" - Position: %d, %d, %d\n", jammon_datapoint.lat, jammon_datapoint.lon, jammon_datapoint.alt);
+                    printf(" - Accuracy: H: %.1fm, V: %.1fm\n", jammon_datapoint.h_acc / 1.0e3, jammon_datapoint.v_acc / 1.0e3);
+                    printf(" - SVs: Acquired: %d, Locked: %d, Used in Nav: %d\n", jammon_datapoint.svs_acquired, jammon_datapoint.svs_locked, jammon_datapoint.svs_nav);
+                    printf(" - AGC: %d, Noise: %d\n", jammon_datapoint.agc, jammon_datapoint.noise);
+                    printf(" - Jamming: CW: %d / 255, Broadband: %d / 3 (0 = invalid)\n", jammon_datapoint.jam_cw, jammon_datapoint.jam_bb);
+                }
+
+                if(jammon_datapoint.time_valid)
+                {
                     int r;
                     char *csv_output_line;
 
@@ -752,7 +753,6 @@ int main(int argc, char *argv[])
                 udp_send_msgpack(&jammon_datapoint);
             }
         }
-
     }
 
     printf("Received signal, closing..\n");
