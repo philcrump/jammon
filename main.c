@@ -928,7 +928,7 @@ int main(int argc, char *argv[])
                 nav_sig_sv_t *sig_sv;
                 for(int i = 0; i < sig_header->num_svs; i++)
                 {
-                    sig_sv = (nav_sig_sv_t *)(&buffer[6+8+(12*i)]);
+                    sig_sv = (nav_sig_sv_t *)(&buffer[6+8+(16*i)]);
 
                     if(sig_sv->qualInd >= 2)
                     {
