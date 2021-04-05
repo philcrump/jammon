@@ -1,5 +1,10 @@
 'use strict';
 
+const highlight_colour_beidou = "rgba(255, 193, 204, 1.0)";
+const highlight_colour_galileo = "rgba(178, 241, 255, 1.0)";
+const highlight_colour_gps = "rgba(163, 255, 153, 1.0)";
+const highlight_colour_glonass = "rgba(241, 222, 197, 1.0)";
+
 var socket = io();
 
 var location_map = null;
@@ -17,6 +22,12 @@ socket.on('connect', function ()
     {
         //console.log(data);
 
+        var multiband = false;
+        if('11' in data)
+        {
+            multiband = true;
+        }
+
         // 0: Timestamp
         $("#gnss-timestamp").text((new Date(data['0'] * 1000)).toLocaleString());
 
@@ -32,7 +43,7 @@ socket.on('connect', function ()
             location_map_marker = L.marker([(data['1'][0] / 1.0e7), (data['1'][1] / 1.0e7)]).addTo(location_map);
 
             L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png',
-                {
+            {
                 maxZoom: 19,
                 attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors'
             }).addTo(location_map);
@@ -57,9 +68,17 @@ socket.on('connect', function ()
         $("#gnss-vacc").text(roundTo((data['2'][1] / 1.0e3), 1));
 
         // 3: SVs
-        $("#svs-acquired").text(data['3'][0]);
-        $("#svs-locked").text(data['3'][1]);
-        $("#svs-nav").text(data['3'][2]);
+        if(multiband)
+        {
+            $("#svs-acquired").text(`${data['3'][0]}·${data['3'][1]}`);
+            $("#svs-locked").text(`${data['3'][2]}·${data['3'][3]}`);
+        }
+        else
+        {
+            $("#svs-acquired").text(data['3'][0]);
+            $("#svs-locked").text(data['3'][2]);
+        }
+        $("#svs-nav").text(data['3'][4]);
 
         // 4: RF
         $("#gnss-rf-agc").text(data['4'][0]);
@@ -70,7 +89,7 @@ socket.on('connect', function ()
         $("#gnss-jamming-broadband").text(data['5'][1]);
         if(data['5'][1] == 0)
         {
-            $("#gnss-jamming-broadband-description").text("INVALID");
+            $("#gnss-jamming-broadband-description").text("UNKNOWN");
         }
         else if(data['5'][1] == 1)
         {
@@ -105,6 +124,8 @@ socket.on('connect', function ()
                 spectrum_graph_data,
                 {
                     valueRange: [0.0, 255.0],
+                    title: 'L1 / E1 / B1',
+                    titleHeight: 24,
                     labels: ['Frequency', 'Power'],
                     xlabel: 'Frequency (MHz)',
                     fillGraph: true,
@@ -128,6 +149,21 @@ socket.on('connect', function ()
                                 ]
                            }
                         }
+                    },
+                    underlayCallback: function(canvas, area, g) {
+                        /* BEIDOU B1 */
+                        highlightGraph(1559, 1592, 10, highlight_colour_beidou, canvas, area, g);
+                        labelGraph(1575.42, 25, "B1", canvas, area, g);
+                        /* Galileo E1 */
+                        highlightGraph(1563, 1588, 30, highlight_colour_galileo, canvas, area, g);
+                        labelGraph(1575.42, 45, "E1", canvas, area, g);
+                        /* GPS L1 */
+                        highlightGraph(1565, 1586, 50, highlight_colour_gps, canvas, area, g);
+                        labelGraph(1575.42, 65, "L1", canvas, area, g);
+                        /* GLONASS L1 */
+                        highlightGraph(1596, 1606, 10, highlight_colour_glonass, canvas, area, g);
+
+                        labelGraph(1601, 30, "G1", canvas, area, g);
                     }
                 }
             );
@@ -160,6 +196,8 @@ socket.on('connect', function ()
                     spectrum_graph2_data,
                     {
                         valueRange: [0.0, 255.0],
+                        title: 'L2 / E5 / B2',
+                        titleHeight: 24,
                         labels: ['Frequency', 'Power'],
                         xlabel: 'Frequency (MHz)',
                         fillGraph: true,
@@ -183,6 +221,20 @@ socket.on('connect', function ()
                                     ]
                                }
                             }
+                        },
+                        underlayCallback: function(canvas, area, g) {
+                            /* BEIDOU B2 */
+                            highlightGraph(1195.14, 1219.14, 10, highlight_colour_beidou, canvas, area, g);
+                            labelGraph(1207.14, 25, "B2", canvas, area, g);
+                            /* Galileo E5b */
+                            highlightGraph(1196.91, 1217.37, 30, highlight_colour_galileo, canvas, area, g);
+                            labelGraph(1207.2, 45, "E5b", canvas, area, g);
+                            /* GPS L2 */
+                            highlightGraph(1217, 1238, 50, highlight_colour_gps, canvas, area, g);
+                            labelGraph(1227.5, 65, "L2", canvas, area, g);
+                            /* GLONASS L2 */
+                            highlightGraph(1241, 1255, 10, highlight_colour_glonass, canvas, area, g);
+                            labelGraph(1248, 25, "G2", canvas, area, g);
                         }
                     }
                 );
@@ -196,10 +248,33 @@ socket.on('connect', function ()
     });
 });
 
-var roundTo = function(n, d) {
+var roundTo = function(n, d)
+{
   var r, e;
   d = Math.pow(10, d);
   e = n * d;
   r = Math.round(e);
   return r / d;
-};
+}
+
+var highlightGraph = function(f1, f2, yoffset, colourString, canvas, area, g)
+{
+    const bottom_left = g.toDomCoords(f1, -20);
+    const top_right = g.toDomCoords(f2, +20);
+
+    const left = bottom_left[0];
+    const right = top_right[0];
+
+    canvas.fillStyle = colourString;
+    canvas.fillRect(left, area.y+yoffset, right - left, area.h);
+}
+
+var labelGraph = function(xf, yoffset, textString, canvas, area, g)
+{
+    const xoffset = g.toDomCoords(xf, 0);
+
+    canvas.fillStyle = "rgba(0, 0, 0, 1.0)";
+    canvas.font = "12px Arial";
+    canvas.textAlign = "center";
+    canvas.fillText(textString, xoffset[0], area.y+yoffset);
+}

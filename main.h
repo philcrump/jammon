@@ -26,7 +26,14 @@ typedef struct {
     int32_t lat, lon, alt;
     uint32_t h_acc, v_acc;
 
-    uint8_t svs_acquired, svs_locked, svs_nav;
+    uint64_t nav_sat_monotonic;
+    uint8_t svs_nav;
+
+    uint64_t nav_sig_monotonic;
+    uint8_t svs_acquired_l1;
+    uint8_t svs_acquired_l2; // Only used in multi-band (eg. F9)
+    uint8_t svs_locked_l1;
+    uint8_t svs_locked_l2; // Only used in multi-band (eg. F9)
 } jammon_datapoint_t;
 
 

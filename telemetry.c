@@ -12,15 +12,12 @@
 #include "main.h"
 #include "cmp.h"
 
-//#define UDP_DESTINATION_HOST    "jammon.philcrump.co.uk"
-#define UDP_DESTINATION_HOST    "127.0.0.1"
-#define UDP_DESTINATION_PORT    44333
-
 #define CMP_BUFFER_SIZE     4096
+static uint8_t buffer[CMP_BUFFER_SIZE];
 
 static uint32_t cmp_buf_ptr = 0;
 
-static void udp_send(uint8_t *buffer, size_t buffer_size)
+static void udp_send(char *host, uint16_t port, uint8_t *buffer, size_t buffer_size)
 {
     int sockfd, n;
     int serverlen;
@@ -46,18 +43,18 @@ static void udp_send(uint8_t *buffer, size_t buffer_size)
     //hints.ai_socktype = SOCK_DGRAM;
     //hints.ai_socktype = SOCK_STREAM;
 
-    result = getaddrinfo(UDP_DESTINATION_HOST , NULL, &hints, &pResultList);
+    result = getaddrinfo(host , NULL, &hints, &pResultList);
 
     if(result != 0)
     {
-        //fprintf(stderr, "Error: Hostname lookup failed for " UDP_DESTINATION_HOST ", message: %s\n", gai_strerror(result));
+        //fprintf(stderr, "Error: Hostname lookup failed for %s, message: %s\n", host, gai_strerror(result));
         close(sockfd);
         return;
     }
     memcpy(&serveraddr, pResultList->ai_addr, sizeof(serveraddr));
     freeaddrinfo(pResultList);
 
-    serveraddr.sin_port = htons(UDP_DESTINATION_PORT);
+    serveraddr.sin_port = htons(port);
 
     /* send the message to the server */
     serverlen = sizeof(serveraddr);
@@ -95,8 +92,7 @@ static size_t file_writer(cmp_ctx_t *ctx, const void *buffer, size_t count) {
     //return fwrite(data, sizeof(uint8_t), count, (FILE *)ctx->buf);
 }
 
-static uint8_t buffer[CMP_BUFFER_SIZE];
-void udp_send_msgpack(jammon_datapoint_t *jammon_datapoint_ptr)
+void udp_send_msgpack(char *host, uint16_t port, jammon_datapoint_t *jammon_datapoint_ptr)
 {
     cmp_ctx_t cmp;
 
@@ -125,9 +121,11 @@ void udp_send_msgpack(jammon_datapoint_t *jammon_datapoint_ptr)
 
     /* Array of [svs_acquired, svs_locked, svs_nav] */
     cmp_write_uint(&cmp, 3);
-    cmp_write_array(&cmp, 3);
-    cmp_write_uint(&cmp, jammon_datapoint_ptr->svs_acquired);
-    cmp_write_uint(&cmp, jammon_datapoint_ptr->svs_locked);
+    cmp_write_array(&cmp, 5);
+    cmp_write_uint(&cmp, jammon_datapoint_ptr->svs_acquired_l1);
+    cmp_write_uint(&cmp, jammon_datapoint_ptr->svs_acquired_l2);
+    cmp_write_uint(&cmp, jammon_datapoint_ptr->svs_locked_l1);
+    cmp_write_uint(&cmp, jammon_datapoint_ptr->svs_locked_l2);
     cmp_write_uint(&cmp, jammon_datapoint_ptr->svs_nav);
 
     /* Array of [agc, noise] */
@@ -161,5 +159,5 @@ void udp_send_msgpack(jammon_datapoint_t *jammon_datapoint_ptr)
         cmp_write_uint(&cmp, jammon_datapoint_ptr->pga2);
     }
 
-    udp_send(buffer, cmp_buf_ptr);
+    udp_send(host, port, buffer, cmp_buf_ptr);
 }

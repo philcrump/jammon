@@ -33,7 +33,7 @@ server.on('message', (msg, rinfo) => {
 
 server.on('listening', () => {
   const address = server.address();
-  console.log(`UDP server listening ${address.address}:${address.port}`);
+  console.log(`UDP server listening on: ${address.address}:${address.port}`);
 });
 
 server.bind(port_input_udp_msgpack);
@@ -43,5 +43,5 @@ server.bind(port_input_udp_msgpack);
 app.use(express.static('htdocs'));
 
 http.listen(port_output_http, () => {
-  console.log(`HTTP listening on *:${port_output_http} dev link: http://127.0.0.1:${port_output_http}`);
+  console.log(`HTTP listening on *:${port_output_http} (dev: http://127.0.0.1:${port_output_http})`);
 });
