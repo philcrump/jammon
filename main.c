@@ -9,6 +9,7 @@
 #include <fcntl.h>
 #include <signal.h>
 #include <time.h>
+#include <errno.h>
 
 #include "main.h"
 #include "telemetry.h"
@@ -285,6 +286,7 @@ static const uint8_t msg_nack_header[4] = { 0xb5, 0x62, 0x05, 0x00 };
 static uint8_t send_ubx_wait_ack(int fd, const uint8_t *buffer, uint32_t buffer_size)
 {
     uint32_t k;
+    int32_t device_response;
     uint8_t msg_class_id = buffer[2];
     uint8_t msg_msg_id = buffer[3];
 
@@ -298,7 +300,20 @@ static uint8_t send_ubx_wait_ack(int fd, const uint8_t *buffer, uint32_t buffer_
     uint32_t response_index = 0;
     for(k = 0; (k < 1000) && !app_exit; k++)
     {
-        if(read(fd, &response_byte, 1) > 0)
+        device_response = read(fd, &response_byte, 1);
+        if(device_response == 0)
+        {
+            fprintf(stderr, "GNSS Device EOF (device disconnected).\n");
+            app_exit = true;
+            return 0;
+        }
+        else if(device_response < 0)
+        {
+            fprintf(stderr, "GNSS Device Read Error: %s\n", strerror(errno));
+            app_exit = true;
+            return 0;
+        }
+        else if(device_response > 0)
         {
             if(response_index <= 3 && response_byte == msg_ack_header[response_index])
             {
@@ -339,13 +354,27 @@ static uint8_t send_ubx_wait_ack(int fd, const uint8_t *buffer, uint32_t buffer_
 static const uint8_t msg_header[2] = { 0xb5, 0x62 };
 static uint32_t wait_ubx(int fd, uint8_t *buffer)
 {
+    int32_t device_response;
     uint8_t response_byte;
     uint32_t response_index = 0;
     uint32_t response_length = 0;
 
     while(!app_exit)
     {
-        if(read(fd, &response_byte, 1) > 0)
+        device_response = read(fd, &response_byte, 1);
+        if(device_response == 0)
+        {
+            fprintf(stderr, "GNSS Device EOF (device disconnected).\n");
+            app_exit = true;
+            return 0;
+        }
+        else if(device_response < 0)
+        {
+            fprintf(stderr, "GNSS Device Read Error: %s\n", strerror(errno));
+            app_exit = true;
+            return 0;
+        }
+        else if(device_response > 0)
         {
             if(response_index < 2 && response_byte == msg_header[response_index])
             {

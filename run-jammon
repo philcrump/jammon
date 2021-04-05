@@ -1,9 +1,15 @@
 #!/usr/bin/env bash
 
-port_path="$(ls /dev/ttyACM*)"
-
 host_address="178.79.188.82" # jammon.philcrump.co.uk
 host_port=44333
+
+port_path="$(ls /dev/ttyACM*)"
+
+if [ -z $port_path ];
+then
+	echo "No serial device found!";
+	exit;
+fi
 
 source_dir="$(cd $(dirname ${BASH_SOURCE[0]}) && pwd)";
 cd "$source_dir";
