@@ -79,8 +79,11 @@ static size_t file_writer(cmp_ctx_t *ctx, const void *buffer, size_t count) {
 
     uint16_t i;
     uint8_t *buffer_ptr = (uint8_t *)buffer;
-    //if (cmp_buf_ptr+count > HB_BUF_LEN)
-    //  return -1;
+
+    if (cmp_buf_ptr+count > CMP_BUFFER_SIZE)
+    {
+        return -1;
+    }
 
     for (i = 0; i < count; i++)
     {
