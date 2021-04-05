@@ -570,7 +570,7 @@ void sigint_handler(int sig)
 
 static void usage( void )
 {
-    printf("Usage: jammon [-v] [-M] -d <device> -h <host> -p <port>\n");  
+    printf("Usage: jammon [-v] [-M] -d <device> -H <host> -P <port>\n");  
 }
  
 int main(int argc, char *argv[])
@@ -586,25 +586,29 @@ int main(int argc, char *argv[])
     signal(SIGINT, sigint_handler);
     signal(SIGTERM, sigint_handler);
    
-    while((option = getopt( argc, argv, "vd:Mh:p:")) != -1)
+    while((option = getopt( argc, argv, "vd:MH:P:")) != -1)
     {
         switch(option)
         {
             case 'd':
-                printf(" * Using serial device: %s\n", optarg);
                 devName = strdup(optarg);
+                printf(" * Using serial device: %s\n", devName);
                 break;
             case 'v':
-                printf(" * Verbose Mode Enabled\n");
                 verbose = true;
+                printf(" * Verbose Mode Enabled\n");
                 break;
             case 'M':
-                printf(" * Multiband (F9) Enabled\n");
                 multiband = true;
+                printf(" * Multiband (F9) Enabled\n");
                 break;
-            case 'h':
-                printf(" * Using target host: %s\n", optarg);
+            case 'H':
                 udp_host = strdup(optarg);
+                printf(" * Using target host: %s\n", udp_host);
+                break;
+            case 'P':
+                udp_port = atoi(optarg);
+                printf(" * Using target port: %d\n", udp_port);
                 break;
             default:
                 usage();
