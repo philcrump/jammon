@@ -1,7 +1,14 @@
 #!/usr/bin/env bash
 
 port_path="$(ls /dev/ttyACM*)"
+
+host_address="178.79.188.82" # jammon.philcrump.co.uk
+host_port=44333
+
+source_dir="$(cd $(dirname ${BASH_SOURCE[0]}) && pwd)";
+cd "$source_dir";
+
 if [ $? -eq 0 ];
 then
-	/home/pi/jammon/jammon -d ${port_path} -M;
+	./jammon -d ${port_path} -M -H ${host_address} -P ${host_port};
 fi
