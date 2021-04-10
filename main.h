@@ -2,9 +2,11 @@
 #define __MAIN_H__
 
 typedef struct {
-    uint64_t mon_hw_monotonic;
+    uint64_t mon_rf_monotonic;
     uint16_t agc, noise;
     uint8_t jam_cw, jam_bb;
+    uint16_t agc2, noise2;
+    uint8_t jam_cw2, jam_bb2;
 
     uint64_t mon_span_monotonic;
     uint8_t spectrum[256];

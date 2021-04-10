@@ -16,5 +16,5 @@ cd "$source_dir";
 
 if [ $? -eq 0 ];
 then
-	./jammon -d ${port_path} -M -H ${host_address} -P ${host_port};
+	./jammon -r -d ${port_path} -M -H ${host_address} -P ${host_port};
 fi

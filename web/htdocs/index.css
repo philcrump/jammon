@@ -16,5 +16,7 @@ body {
 }
 #gnss-spectrum2-graph {
 	height: 250px;
+}
+.l2_elements {
 	display: none;
 }

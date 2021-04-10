@@ -26,6 +26,7 @@ socket.on('connect', function ()
         if('11' in data)
         {
             multiband = true;
+            $(".l2_elements").show();
         }
 
         // 0: Timestamp
@@ -68,21 +69,29 @@ socket.on('connect', function ()
         $("#gnss-vacc").text(roundTo((data['2'][1] / 1.0e3), 1));
 
         // 3: SVs
-        if(multiband)
-        {
-            $("#svs-acquired").text(`${data['3'][0]}·${data['3'][1]}`);
-            $("#svs-locked").text(`${data['3'][2]}·${data['3'][3]}`);
-        }
-        else
+        if(!multiband)
         {
             $("#svs-acquired").text(data['3'][0]);
             $("#svs-locked").text(data['3'][2]);
         }
+        else
+        {
+            $("#svs-acquired").text(`${data['3'][0]}·${data['3'][1]}`);
+            $("#svs-locked").text(`${data['3'][2]}·${data['3'][3]}`);
+        }
         $("#svs-nav").text(data['3'][4]);
 
         // 4: RF
-        $("#gnss-rf-agc").text(data['4'][0]);
-        $("#gnss-rf-noise").text(data['4'][1]);
+        if(!multiband)
+        {
+            $("#gnss-rf-agc").text(data['4'][0]);
+            $("#gnss-rf-noise").text(data['4'][1]);
+        }
+        else
+        {
+            $("#gnss-rf-agc").text(`${data['4'][0]}·${data['6'][0]}`);
+            $("#gnss-rf-noise").text(`${data['4'][1]}·${data['6'][1]}`);
+        }
 
         // 5: Jamming
         $("#gnss-jamming-cw").text(data['5'][0]);
@@ -102,6 +111,27 @@ socket.on('connect', function ()
         else if(data['5'][1] == 3)
         {
             $("#gnss-jamming-broadband-description").text("CRITICAL");
+        }
+        if(multiband)
+        {
+            $("#gnss2-jamming-cw").text(data['7'][0]);
+            $("#gnss2-jamming-broadband").text(data['7'][1]);
+            if(data['7'][1] == 0)
+            {
+                $("#gnss2-jamming-broadband-description").text("UNKNOWN");
+            }
+            else if(data['7'][1] == 1)
+            {
+                $("#gnss2-jamming-broadband-description").text("OK");
+            }
+            else if(data['7'][1] == 2)
+            {
+                $("#gnss2-jamming-broadband-description").text("WARNING");
+            }
+            else if(data['7'][1] == 3)
+            {
+                $("#gnss2-jamming-broadband-description").text("CRITICAL");
+            }
         }
 
         // 10: Spectrum
@@ -174,7 +204,7 @@ socket.on('connect', function ()
         }
 
         // 11: L2 Spectrum (optional)
-        if('11' in data)
+        if(multiband)
         {
             var gnss_spectrum_centerfreq = data['11'][0] / 1.0e6;
             var gnss_spectrum_resolution = data['11'][1] / 1.0e6;
@@ -190,7 +220,6 @@ socket.on('connect', function ()
 
             if(spectrum_graph2 == null)
             {
-                $("#gnss-spectrum2-graph").show();
                 spectrum_graph2 = new Dygraph(
                     document.getElementById("gnss-spectrum2-graph"),
                     spectrum_graph2_data,

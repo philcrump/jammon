@@ -103,7 +103,7 @@ void udp_send_msgpack(char *host, uint16_t port, jammon_datapoint_t *jammon_data
     cmp_init(&cmp, (void*)buffer, 0, file_skipper, file_writer);
 
     /* Start map, 7 items, 8 items if multiband (spectrum2) */
-    cmp_write_map(&cmp, (jammon_datapoint_ptr->multiband ? 8 : 7));
+    cmp_write_map(&cmp, (jammon_datapoint_ptr->multiband ? 10 : 7));
 
     /* GNSS timestamp */
     cmp_write_uint(&cmp, 0);
@@ -142,6 +142,21 @@ void udp_send_msgpack(char *host, uint16_t port, jammon_datapoint_t *jammon_data
     cmp_write_array(&cmp, 2);
     cmp_write_uint(&cmp, jammon_datapoint_ptr->jam_cw);
     cmp_write_uint(&cmp, jammon_datapoint_ptr->jam_bb);
+
+    if(jammon_datapoint_ptr->multiband)
+    {
+        /* Array of [agc, noise] */
+        cmp_write_uint(&cmp, 6);
+        cmp_write_array(&cmp, 2);
+        cmp_write_uint(&cmp, jammon_datapoint_ptr->agc2);
+        cmp_write_uint(&cmp, jammon_datapoint_ptr->noise2);
+
+        /* Array of [jam_cw, jam_bb] */
+        cmp_write_uint(&cmp, 7);
+        cmp_write_array(&cmp, 2);
+        cmp_write_uint(&cmp, jammon_datapoint_ptr->jam_cw2);
+        cmp_write_uint(&cmp, jammon_datapoint_ptr->jam_bb2);
+    }
 
     /* Array of [center, res, spectrum[256], pga] */
     cmp_write_uint(&cmp, 10);

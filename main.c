@@ -21,7 +21,18 @@ static bool multiband = false;
 #define BUFFER_LENGTH   2048
 static uint8_t buffer[BUFFER_LENGTH];
 
-/*** Disable NMEA ***/
+/* Reset */
+static const uint8_t ubx_cfg_rst[] = {
+    0xb5, 0x62,
+    0x06, 0x04,
+    0x04, 0x00,
+    0x00, 0x00, /* BBR Sections to clear (0x0000 == Hot Start) */
+    0x04, /* 0x04 = Hardware reset (watchdog) aftershutdown */
+    0x00, /* [Reserved] */
+    0x12, 0x6c /* Checksum */
+};
+
+/* Disable NMEA */
 static const uint8_t ubx_disable_nmea_usb[] = {
     0xb5, 0x62,
     0x06, 0x00,
@@ -36,8 +47,18 @@ static const uint8_t ubx_disable_nmea_usb[] = {
     0x21, 0xa2 /* Checksum */
 };
 
-/*** MODEL, 4 = automotive ***/
-/* UBX-CFG-NAV5 */
+/* Enable Interference Detection  */
+static const uint8_t ubx_cfg_valset_enable_itfm[] = {
+    0xb5, 0x62,
+    0x06, 0x8a, /* UBX-CFG-VALSET */
+    0x0e, 0x00,
+    0x00, 0x01, 0x00, 0x00,
+    0x0d, 0x00, 0x41, 0x10, 0x01, // Enable ITFM ( 0x1041000d )
+    0x10, 0x00, 0x41, 0x20, 0x02, // Set Active Antenna ( 0x20410010 )
+    0x71, 0xd8 /* Checksum */
+};
+
+/* Set Automotive dynamic model */
 static const uint8_t ubx_set_nav_automotive[] = {
     0xb5, 0x62,
     0x06, 0x24,
@@ -64,7 +85,7 @@ static const uint8_t ubx_set_nav_automotive[] = {
     0x53, 0x70 /* Checksum */
 };
 
-/* Time & Position */
+/* Time & Position Message */
 static const uint8_t ubx_enable_nav_pvt[] = {
     0xb5, 0x62,
     0x06, 0x01, /* UBX-CFG-MSG */
@@ -79,39 +100,52 @@ static const uint8_t ubx_enable_nav_pvt[] = {
     0x18, 0xdf /* Checksum */
 };
 
-typedef struct {
-    uint32_t pinSel, pinBank, pinDir, pinVal;
-
-    uint16_t noisePerMS;
-    uint16_t agcCnt;
-
-    uint8_t aStatus;
-    uint8_t aPower;
-    uint8_t flags;
-    uint8_t res1;
-
-    uint32_t usedMask;
-
-    uint8_t VP[17];
-    uint8_t jamInd; /* CW jamming measure */
-    uint16_t res2;
-    uint32_t pinIrq, pullH, pullL;
-} __attribute__((packed)) mon_hw_t;
-
-/* Jamming indicators */
-static const uint8_t ubx_enable_mon_hw[] = {
+/* Jamming indicators Message */
+static const uint8_t ubx_enable_mon_rf[] = {
     0xb5, 0x62,
     0x06, 0x01, /* UBX-CFG-MSG */
     0x08, 0x00,
-    0x0A, 0x09, /* Enable UBX-MON-HW */
+    0x0A, 0x38, /* Enable UBX-MON-RF */
     0x00, /* Port 0 (I2C) */
     0x00, /* Port 1 (UART/UART1) */
     0x00, /* Port 2 (UART2) */
     0x01, /* Port 3 (USB) at 1 second interval */
     0x00, /* Port 4 */
     0x00, /* Port 5 */
-    0x23, 0x35 /* Checksum */
+    0x52, 0x7E /* Checksum */
 };
+
+typedef struct
+{
+    uint8_t version;
+    uint8_t num_rfblocks;
+    uint8_t _reserved1;
+    uint8_t _reserved2;
+} __attribute__((packed)) mon_rf_header_t;
+
+typedef struct
+{
+    uint8_t rfblock_id;
+    uint8_t flags;
+    uint8_t antStatus;
+    uint8_t antPower;
+    uint32_t postStatus;
+    uint8_t _reserved1;
+    uint8_t _reserved2;
+    uint8_t _reserved3;
+    uint8_t _reserved4;
+    uint16_t noisePerMS;
+    uint16_t agcCnt;
+    uint8_t jamInd; /* CW jamming measure */
+    int8_t ofsI;
+    uint8_t magI;
+    int8_t ofsQ;
+    uint8_t magQ;
+    uint8_t _reserved5;
+    uint8_t _reserved6;
+    uint8_t _reserved7;
+} __attribute__((packed)) mon_rf_rfblock_t;
+
 
 /* Crude Spectrum Analyzer */
 static const uint8_t ubx_enable_mon_span[] = {
@@ -147,15 +181,6 @@ typedef struct
     uint8_t _reserved2;
     uint8_t _reserved3;
 } __attribute__((packed)) mon_span_rfblock_t;
-
-/* Enable Interference Detection, BB threshold = 3dB, CW = 15dB, Active antenna */
-static const uint8_t ubx_enable_itfm[] = {
-    0xb5, 0x62,
-    0x06, 0x39, /* UBX-CFG-ITFM */
-    0x08, 0x00,
-    0xf3, 0xac, 0x62, 0xad, 0x1e, 0x63, 0x31, 0x00,
-    0xa7, 0x07 /* Checksum */
-};
 
 typedef struct
 {
@@ -267,6 +292,19 @@ static uint64_t monotonic_ms(void)
     return (uint64_t) tp.tv_sec * 1000 + tp.tv_nsec / 1000000;
 }
 
+static void sleep_ms(uint32_t _duration)
+{
+    struct timespec req, rem;
+    req.tv_sec = _duration / 1000;
+    req.tv_nsec = (_duration - (req.tv_sec*1000))*1000*1000;
+
+    while(nanosleep(&req, &rem) == EINTR)
+    {
+        /* Interrupted by signal, shallow copy remaining time into request, and resume */
+        req = rem;
+    }
+}
+
 static bool ubx_verify_checksum(const uint8_t *buffer, int32_t buffer_size)
 {
     uint32_t ck_a = 0, ck_b = 0;
@@ -287,6 +325,7 @@ static uint8_t send_ubx_wait_ack(int fd, const uint8_t *buffer, uint32_t buffer_
 {
     uint32_t k;
     int32_t device_response;
+    uint8_t response_byte;
     uint8_t msg_class_id = buffer[2];
     uint8_t msg_msg_id = buffer[3];
 
@@ -296,22 +335,19 @@ static uint8_t send_ubx_wait_ack(int fd, const uint8_t *buffer, uint32_t buffer_
         return 3;
     }
 
-    uint8_t response_byte;
     uint32_t response_index = 0;
-    for(k = 0; (k < 1000) && !app_exit; k++)
+    for(k = 0; (k < 2000) && !app_exit; k++)
     {
         device_response = read(fd, &response_byte, 1);
         if(device_response == 0)
         {
-            fprintf(stderr, "GNSS Device EOF (device disconnected).\n");
-            app_exit = true;
-            return 0;
+            fprintf(stderr, " - GNSS Device EOF (device disconnected).\n");
+            return 1;
         }
         else if(device_response < 0)
         {
-            fprintf(stderr, "GNSS Device Read Error: %s\n", strerror(errno));
-            app_exit = true;
-            return 0;
+            fprintf(stderr, " - GNSS Device Read Error: %s\n", strerror(errno));
+            return 1;
         }
         else if(device_response > 0)
         {
@@ -337,6 +373,7 @@ static uint8_t send_ubx_wait_ack(int fd, const uint8_t *buffer, uint32_t buffer_
             else if(response_index == 3 && response_byte == msg_nack_header[response_index])
             {
                 /* Got NACK */
+                fprintf(stderr, " - Got NACK\n");
                 return 2;
             }
             else
@@ -349,6 +386,17 @@ static uint8_t send_ubx_wait_ack(int fd, const uint8_t *buffer, uint32_t buffer_
     fprintf(stderr, " - Timed out\n");
 
     return 1;
+}
+
+static uint8_t send_ubx(int fd, const uint8_t *buffer, uint32_t buffer_size)
+{
+    if(write(fd, buffer, buffer_size) != (int)buffer_size)
+    {
+        return 3;
+    }
+
+    tcflush(fd, TCIFLUSH);
+    return 0;
 }
 
 static const uint8_t msg_header[2] = { 0xb5, 0x62 };
@@ -461,8 +509,9 @@ static void process_datapoint(jammon_datapoint_t jammon_datapoint, char *udp_hos
         printf(" - Position: %d, %d, %d\n", jammon_datapoint.lat, jammon_datapoint.lon, jammon_datapoint.alt);
         printf(" - Accuracy: H: %.1fm, V: %.1fm\n", jammon_datapoint.h_acc / 1.0e3, jammon_datapoint.v_acc / 1.0e3);
         printf(" - SVs: Acquired: (%d|%d), Locked: (%d|%d), Used in Nav: %d\n", jammon_datapoint.svs_acquired_l1, jammon_datapoint.svs_acquired_l2, jammon_datapoint.svs_locked_l1, jammon_datapoint.svs_locked_l2, jammon_datapoint.svs_nav);
-        printf(" - AGC: %d, Noise: %d\n", jammon_datapoint.agc, jammon_datapoint.noise);
-        printf(" - Jamming: CW: %d / 255, Broadband: %d / 3 (0 = invalid)\n", jammon_datapoint.jam_cw, jammon_datapoint.jam_bb);
+        printf(" - AGC: %d|%d, Noise: %d|%d\n", jammon_datapoint.agc, jammon_datapoint.agc2, jammon_datapoint.noise, jammon_datapoint.noise2);
+        printf(" - L1 Jamming: CW: %d / 255, Broadband: %d / 3 (0 = invalid)\n", jammon_datapoint.jam_cw, jammon_datapoint.jam_bb);
+        printf(" - L2 Jamming: CW: %d / 255, Broadband: %d / 3 (0 = invalid)\n", jammon_datapoint.jam_cw2, jammon_datapoint.jam_bb2);
     }
 
     if(jammon_datapoint.time_valid)
@@ -470,13 +519,13 @@ static void process_datapoint(jammon_datapoint_t jammon_datapoint, char *udp_hos
         int r;
         char *csv_output_line;
 
-        r = asprintf(&csv_output_line, "%"PRIu64",%.24s,%.5f,%.5f,%.1f,%.1f,%.1f,%d,%d,%d,%d,%d,%d,%d,%d,%d\n",
+        r = asprintf(&csv_output_line, "%"PRIu64",%.24s,%.5f,%.5f,%.1f,%.1f,%.1f,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d\n",
             jammon_datapoint.gnss_timestamp, ctime((time_t *)&jammon_datapoint.gnss_timestamp),
             (jammon_datapoint.lat / 1.0e7), (jammon_datapoint.lon / 1.0e7), (jammon_datapoint.alt / 1.0e3),
             jammon_datapoint.h_acc / 1.0e3, jammon_datapoint.v_acc / 1.0e3,
             jammon_datapoint.svs_acquired_l1, jammon_datapoint.svs_acquired_l2, jammon_datapoint.svs_locked_l1, jammon_datapoint.svs_locked_l2, jammon_datapoint.svs_nav,
-            jammon_datapoint.agc, jammon_datapoint.noise,
-            jammon_datapoint.jam_cw, jammon_datapoint.jam_bb
+            jammon_datapoint.agc, jammon_datapoint.noise, jammon_datapoint.jam_cw, jammon_datapoint.jam_bb,
+            jammon_datapoint.agc2, jammon_datapoint.noise2, jammon_datapoint.jam_cw2, jammon_datapoint.jam_bb2
         );
 
         if(r < 0)
@@ -591,6 +640,50 @@ static void process_datapoint(jammon_datapoint_t jammon_datapoint, char *udp_hos
     udp_send_msgpack(udp_host, udp_port, &jammon_datapoint);
 }
 
+static void open_serialDevice(int *fd_ptr, char *devName)
+{
+    struct termios tty;
+
+    *fd_ptr = open(devName, O_RDWR);
+    if(*fd_ptr < 0)
+    {
+        fprintf(stderr, "Error: Cannot open serial device '%s'\n", devName);
+        return;
+    }
+
+    if (tcgetattr (*fd_ptr, &tty) != 0)
+    {
+        fprintf(stderr, "Error: tcgetattr\n");
+        close(*fd_ptr);
+        *fd_ptr = -1;
+        return;
+    }
+
+    cfsetospeed (&tty, B115200);
+    cfsetispeed (&tty, B115200);
+
+    tty.c_iflag &= ~(IGNBRK | INLCR | IGNCR | ICRNL | IXON | IXOFF | IXANY);
+    tty.c_oflag &= ~(ONLCR | OCRNL);
+    tty.c_lflag &= ~(ECHO | ECHONL | ICANON | ISIG | IEXTEN);
+    tty.c_cc[VMIN]  = 1; // read doesn't block
+    tty.c_cc[VTIME] = 1; // 0.1 seconds read timeout
+
+    tty.c_cflag = (tty.c_cflag & ~CSIZE) | CS8;
+    tty.c_cflag |= (CLOCAL | CREAD);
+    tty.c_cflag &= ~(PARENB | PARODD);
+    tty.c_cflag |= 0;
+    tty.c_cflag &= ~CSTOPB;
+    tty.c_cflag &= ~CRTSCTS;
+
+    if (tcsetattr (*fd_ptr, TCSANOW, &tty) != 0)
+    {
+        fprintf(stderr, "Error: tcsetattr\n");
+        close(*fd_ptr);
+        *fd_ptr = -1;
+        return;
+    }
+}
+
 void sigint_handler(int sig)
 {
     (void)sig;
@@ -599,23 +692,23 @@ void sigint_handler(int sig)
 
 static void usage( void )
 {
-    printf("Usage: jammon [-v] [-M] -d <device> -H <host> -P <port>\n");  
+    printf("Usage: jammon [-v] [-M] [-r] -d <device> -H <host> -P <port>\n");  
 }
  
 int main(int argc, char *argv[])
 {
     int fd;
     int option = 0;
-    char *devName = NULL;
-    struct termios tty;
 
+    char *devName = NULL;
     char *udp_host = NULL;
     uint16_t udp_port = 44333;
+    bool rx_reset = false;
 
     signal(SIGINT, sigint_handler);
     signal(SIGTERM, sigint_handler);
    
-    while((option = getopt( argc, argv, "vd:MH:P:")) != -1)
+    while((option = getopt( argc, argv, "vd:MH:P:r")) != -1)
     {
         switch(option)
         {
@@ -639,6 +732,10 @@ int main(int argc, char *argv[])
                 udp_port = atoi(optarg);
                 printf(" * Using target port: %d\n", udp_port);
                 break;
+            case 'r':
+                rx_reset = true;
+                printf(" * Device Reset enabled\n");
+                break;
             default:
                 usage();
                 return 0;
@@ -651,50 +748,45 @@ int main(int argc, char *argv[])
         return 1;
     }
 
-    if(udp_host == NULL)
-    {
-        udp_host = strdup("localhost");
-    }
-       
     /* Open Serial Port */
-    fd = open(devName, O_RDWR);
+    open_serialDevice(&fd, devName);       
     if(fd < 0)
     {
         fprintf(stderr, "Error: Cannot open serial device '%s'\n", devName);
+        free(devName);
         return 1;
     }
+
+    if(rx_reset)
+    {
+        printf("Resetting GNSS Receiver..\n");
+
+        if(0 != send_ubx(fd, ubx_cfg_rst, sizeof(ubx_cfg_rst)))
+        {
+            fprintf(stderr, "Failed to send reset command\n");
+            close(fd);
+            return 1;
+        }
+        close(fd);
+
+        printf("Waiting 5 seconds for receiver to reboot..\n");
+        sleep_ms(5000);
+
+        printf("Re-opening serial port after reset..\n");
+        open_serialDevice(&fd, devName);    
+        if(fd < 0)
+        {
+            fprintf(stderr, "Error: Cannot re-open serial device '%s'\n", devName);
+            free(devName);
+            return 1;
+        }
+    }
+
     free(devName);
-
-    if (tcgetattr (fd, &tty) != 0)
-    {
-        fprintf(stderr, "Error: tcgetattr\n");
-        return -1;
-    }
-
-    cfsetospeed (&tty, B115200);
-    cfsetispeed (&tty, B115200);
-
-    tty.c_iflag &= ~(IGNBRK | INLCR | IGNCR | ICRNL | IXON | IXOFF | IXANY);
-    tty.c_oflag &= ~(ONLCR | OCRNL);
-    tty.c_lflag &= ~(ECHO | ECHONL | ICANON | ISIG | IEXTEN);
-    tty.c_cc[VMIN]  = 1; // read doesn't block
-    tty.c_cc[VTIME] = 1; // 0.1 seconds read timeout
-
-    tty.c_cflag = (tty.c_cflag & ~CSIZE) | CS8;
-    tty.c_cflag |= (CLOCAL | CREAD);
-    tty.c_cflag &= ~(PARENB | PARODD);
-    tty.c_cflag |= 0;
-    tty.c_cflag &= ~CSTOPB;
-    tty.c_cflag &= ~CRTSCTS;
-
-    if (tcsetattr (fd, TCSANOW, &tty) != 0)
-    {
-        fprintf(stderr, "Error: tcsetattr\n");
-        return -1;
-    }
 
     printf("Configuring..\n");
 
+    if(verbose) printf(" - Disabling NMEA on usb..\n");
     if(0 != send_ubx_wait_ack(fd, ubx_disable_nmea_usb, sizeof(ubx_disable_nmea_usb)))
     {
         fprintf(stderr, "Failed to disable NMEA on USB\n");
@@ -702,48 +794,15 @@ int main(int argc, char *argv[])
         return 1;
     }
 
-    if(0 != send_ubx_wait_ack(fd, ubx_enable_nav_pvt, sizeof(ubx_enable_nav_pvt)))
-    {
-        fprintf(stderr, "Failed to enable NAV PVT\n");
-        close(fd);
-        return 1;
-    }
-
-    if(0 != send_ubx_wait_ack(fd, ubx_enable_nav_sat, sizeof(ubx_enable_nav_sat)))
-    {
-        fprintf(stderr, "Failed to enable NAV SAT\n");
-        close(fd);
-        return 1;
-    }
-
-    if(0 != send_ubx_wait_ack(fd, ubx_enable_nav_sig, sizeof(ubx_enable_nav_sig)))
-    {
-        fprintf(stderr, "Failed to enable NAV SIG\n");
-        close(fd);
-        return 1;
-    }
-
-    if(0 != send_ubx_wait_ack(fd, ubx_enable_mon_hw, sizeof(ubx_enable_mon_hw)))
-    {
-        fprintf(stderr, "Failed to enable MON HW\n");
-        close(fd);
-        return 1;
-    }
-
-    if(0 != send_ubx_wait_ack(fd, ubx_enable_mon_span, sizeof(ubx_enable_mon_span)))
-    {
-        fprintf(stderr, "Failed to enable MON SPAN\n");
-        close(fd);
-        return 1;
-    }
-
-    if(0 != send_ubx_wait_ack(fd, ubx_enable_itfm, sizeof(ubx_enable_itfm)))
+    if(verbose) printf(" - Enabling interference detection..\n");
+    if(0 != send_ubx_wait_ack(fd, ubx_cfg_valset_enable_itfm, sizeof(ubx_cfg_valset_enable_itfm)))
     {
         fprintf(stderr, "Failed to enable interference detection\n");
         close(fd);
         return 1;
     }
 
+    if(verbose) printf(" - Setting automotive mode..\n");
     if(0 != send_ubx_wait_ack(fd, ubx_set_nav_automotive, sizeof(ubx_set_nav_automotive)))
     {
         fprintf(stderr, "Failed to set automotive model\n");
@@ -751,7 +810,55 @@ int main(int argc, char *argv[])
         return 1;
     }
 
+    if(verbose) printf(" - Enabling NAV-PVT..\n");
+    if(0 != send_ubx_wait_ack(fd, ubx_enable_nav_pvt, sizeof(ubx_enable_nav_pvt)))
+    {
+        fprintf(stderr, "Failed to enable NAV PVT\n");
+        close(fd);
+        return 1;
+    }
+
+    if(verbose) printf(" - Enabling NAV-SAT..\n");
+    if(0 != send_ubx_wait_ack(fd, ubx_enable_nav_sat, sizeof(ubx_enable_nav_sat)))
+    {
+        fprintf(stderr, "Failed to enable NAV SAT\n");
+        close(fd);
+        return 1;
+    }
+
+    if(verbose) printf(" - Enabling NAV-SIG..\n");
+    if(0 != send_ubx_wait_ack(fd, ubx_enable_nav_sig, sizeof(ubx_enable_nav_sig)))
+    {
+        fprintf(stderr, "Failed to enable NAV SIG\n");
+        close(fd);
+        return 1;
+    }
+
+    if(verbose) printf(" - Enabling MON-RF..\n");
+    if(0 != send_ubx_wait_ack(fd, ubx_enable_mon_rf, sizeof(ubx_enable_mon_rf)))
+    {
+        fprintf(stderr, "Failed to enable MON RF\n");
+        close(fd);
+        return 1;
+    }
+
+    if(verbose) printf(" - Enabling MON-SPAN..\n");
+    if(0 != send_ubx_wait_ack(fd, ubx_enable_mon_span, sizeof(ubx_enable_mon_span)))
+    {
+        fprintf(stderr, "Failed to enable MON SPAN\n");
+        close(fd);
+        return 1;
+    }
+
+    /* SBAS */
+    /* Defaults to using SBAS for navigation and differential correction */
+
     printf("Configuration Successful\n");
+
+    if(udp_host == NULL)
+    {
+        udp_host = strdup("localhost");
+    }
 
     jammon_datapoint_t jammon_datapoint = { 0 };
     jammon_datapoint.multiband = multiband;
@@ -775,21 +882,65 @@ int main(int argc, char *argv[])
             printf("\n");
             #endif
 
-            if(buffer[2] == 0x0a && buffer[3] == 0x09) /* MON-HW */
+            if(buffer[2] == 0x0a && buffer[3] == 0x38) /* MON-RF */
             {
                 if(verbose)
                 {
-                    printf("# Got MON-HW at %.3f (monotonic)\n", (double)received_monotonic_ms / 1000);
+                    printf("# Got MON-RF at %.3f (monotonic)\n", (double)received_monotonic_ms / 1000);
                 }
 
-                mon_hw_t *hw = (mon_hw_t *)(&buffer[6]);
+                mon_rf_header_t *rf_header = (mon_rf_header_t *)(&buffer[6]);
 
-                jammon_datapoint.agc = hw->agcCnt;
-                jammon_datapoint.noise = hw->noisePerMS;
-                jammon_datapoint.jam_cw = hw->jamInd;
-                jammon_datapoint.jam_bb = (hw->flags & 0x0c) >> 2; /* 0 - unknown, 1 - OK, 2 - Warning, 3 - Critical */
+                if(rf_header->version != 0x00)
+                {
+                    fprintf(stderr, "Error: Version mismatch of MON-RF, expected 0x00, received: 0x%02"PRIx8"\n", rf_header->version);
+                    continue;
+                }
 
-                jammon_datapoint.mon_hw_monotonic = monotonic_ms();
+                if(multiband == false)
+                {
+                    /* Single-band, (probably L1) - eg. M9 */
+
+                    if(rf_header->num_rfblocks != 1)
+                    {
+                        fprintf(stderr, "Error: Number of MON-RF RF Blocks, expected 1 (single-band), received: %"PRIu8"\n", rf_header->num_rfblocks);
+                        continue;
+                    }
+
+                    mon_rf_rfblock_t *rf_rfblock = (mon_rf_rfblock_t *)(&buffer[6+4+0]);
+
+                    jammon_datapoint.agc = rf_rfblock->agcCnt;
+                    jammon_datapoint.noise = rf_rfblock->noisePerMS;
+                    jammon_datapoint.jam_cw = rf_rfblock->jamInd;
+                    jammon_datapoint.jam_bb = (rf_rfblock->flags & 0x03) >> 2; /* 0 - unknown, 1 - OK, 2 - Warning, 3 - Critical */
+                }
+                else
+                {
+                    /* Dual-band (probably L1 + L2) - eg. F9 */
+
+                    if(rf_header->num_rfblocks != 2)
+                    {
+                        fprintf(stderr, "Error: Number of MON-RF RF Blocks, expected 2 (multi-band), received: %"PRIu8"\n", rf_header->num_rfblocks);
+                        continue;
+                    }
+
+                    mon_rf_rfblock_t *rf_rfblock = (mon_rf_rfblock_t *)(&buffer[6+4+0]);
+
+                    jammon_datapoint.agc = rf_rfblock->agcCnt;
+                    jammon_datapoint.noise = rf_rfblock->noisePerMS;
+                    jammon_datapoint.jam_cw = rf_rfblock->jamInd;
+                    jammon_datapoint.jam_bb = (rf_rfblock->flags & 0x03); /* 0 - unknown, 1 - OK, 2 - Warning, 3 - Critical */
+
+                    /* Re-use pointer for second block */
+                    rf_rfblock = (mon_rf_rfblock_t *)(&buffer[6+4+24]);
+
+                    jammon_datapoint.agc2 = rf_rfblock->agcCnt;
+                    jammon_datapoint.noise2 = rf_rfblock->noisePerMS;
+                    jammon_datapoint.jam_cw2 = rf_rfblock->jamInd;
+                    jammon_datapoint.jam_bb2 = (rf_rfblock->flags & 0x03); /* 0 - unknown, 1 - OK, 2 - Warning, 3 - Critical */
+                }
+
+                jammon_datapoint.mon_rf_monotonic = received_monotonic_ms;
             }
             else if(buffer[2] == 0x0a && buffer[3] == 0x31) /* MON-SPAN */
             {
@@ -961,7 +1112,7 @@ int main(int argc, char *argv[])
             }
 
             if(    (last_sent_monotonic_ms == 0 || last_sent_monotonic_ms + 900 < received_monotonic_ms)
-                && (jammon_datapoint.mon_hw_monotonic + 900 > received_monotonic_ms)
+                && (jammon_datapoint.mon_rf_monotonic + 900 > received_monotonic_ms)
                 && (jammon_datapoint.mon_span_monotonic + 900 > received_monotonic_ms)
                 && (jammon_datapoint.nav_pvt_monotonic + 900 > received_monotonic_ms)
                 && (jammon_datapoint.nav_sat_monotonic + 900 > received_monotonic_ms)
